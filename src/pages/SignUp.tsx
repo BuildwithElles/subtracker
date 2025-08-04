@@ -120,14 +120,18 @@ export default function SignUp() {
       } else if (data.user) {
         // Store referrer code if provided
         if (formData.referrerCode) {
-          await supabase
-            .from('referrals')
-            .insert({
-              user_id: data.user.id,
-              referrer_code: formData.referrerCode,
-              created_at: new Date().toISOString()
-            })
-            .catch(err => console.warn('Failed to store referrer code:', err))
+          try {
+            await supabase
+              .from('referrals')
+              .insert({
+                user_id: data.user.id,
+                referrer_code: formData.referrerCode,
+                created_at: new Date().toISOString()
+              })
+          } catch (referralError) {
+            console.warn('Failed to store referrer code:', referralError)
+            // Don't block signup if referral storage fails
+          }
         }
 
         // Redirect to dashboard on success
