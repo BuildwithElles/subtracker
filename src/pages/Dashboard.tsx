@@ -73,7 +73,7 @@ const dummyBudget: BudgetProfile = {
 }
 
 export default function Dashboard() {
-  const [subscriptions] = useState<Subscription[]>(dummySubscriptions)
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(dummySubscriptions)
   const [budgetProfile] = useState<BudgetProfile | null>(dummyBudget)
   const [loading] = useState(false)
   const [_user, _setUser] = useState<any>(null)
@@ -82,6 +82,10 @@ export default function Dashboard() {
   const [_userMetadata, setUserMetadata] = useState<UserMetadata>({})
   const [showGmailModal, setShowGmailModal] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   useEffect(() => {
     checkUser()
@@ -207,6 +211,89 @@ export default function Dashboard() {
     } finally {
       setIsScanning(false)
     }
+  }
+
+  // Subscription Management Functions
+  const handleAddSubscription = async (subscriptionData: Omit<Subscription, 'id'>) => {
+    try {
+      const newSubscription: Subscription = {
+        ...subscriptionData,
+        id: `new-${Date.now()}` // Generate temporary ID, in real app use Supabase auto-generated ID
+      }
+      
+      // In real implementation, save to Supabase
+      // const { data, error } = await supabase.from('subscriptions').insert(newSubscription)
+      
+      setSubscriptions(prev => [...prev, newSubscription])
+      setShowAddModal(false)
+      alert('Subscription added successfully!')
+    } catch (error) {
+      console.error('Error adding subscription:', error)
+      alert('Failed to add subscription. Please try again.')
+    }
+  }
+
+  const handleEditSubscription = async (subscriptionData: Subscription) => {
+    try {
+      // In real implementation, update in Supabase
+      // const { error } = await supabase.from('subscriptions').update(subscriptionData).eq('id', subscriptionData.id)
+      
+      setSubscriptions(prev => 
+        prev.map(sub => sub.id === subscriptionData.id ? subscriptionData : sub)
+      )
+      setShowEditModal(false)
+      setEditingSubscription(null)
+      alert('Subscription updated successfully!')
+    } catch (error) {
+      console.error('Error updating subscription:', error)
+      alert('Failed to update subscription. Please try again.')
+    }
+  }
+
+  const handleCancelSubscription = async (subscriptionId: string) => {
+    if (!confirm('Are you sure you want to cancel this subscription?')) return
+    
+    try {
+      setSubscriptions(prev => 
+        prev.map(sub => 
+          sub.id === subscriptionId ? { ...sub, status: 'cancelled' } : sub
+        )
+      )
+      alert('Subscription cancelled successfully!')
+    } catch (error) {
+      console.error('Error cancelling subscription:', error)
+      alert('Failed to cancel subscription. Please try again.')
+    }
+  }
+
+  const handleDuplicateSubscription = (subscription: Subscription) => {
+    setEditingSubscription({
+      ...subscription,
+      id: '', // Clear ID for new subscription
+      service_name: `${subscription.service_name} (Copy)`
+    })
+    setShowAddModal(true)
+  }
+
+  const handleDeleteSubscription = async (subscriptionId: string) => {
+    if (!confirm('Are you sure you want to delete this subscription? This action cannot be undone.')) return
+    
+    try {
+      // In real implementation, delete from Supabase
+      // const { error } = await supabase.from('subscriptions').delete().eq('id', subscriptionId)
+      
+      setSubscriptions(prev => prev.filter(sub => sub.id !== subscriptionId))
+      alert('Subscription deleted successfully!')
+    } catch (error) {
+      console.error('Error deleting subscription:', error)
+      alert('Failed to delete subscription. Please try again.')
+    }
+  }
+
+  const openEditModal = (subscription: Subscription) => {
+    setEditingSubscription(subscription)
+    setShowEditModal(true)
+    setOpenMenuId(null)
   }
 
   // Calculate metrics
@@ -518,6 +605,13 @@ export default function Dashboard() {
                 subscriptions={subscriptions}
                 formatCurrencyWithConversion={formatCurrencyWithConversion}
                 formatDate={formatDate}
+                onEdit={openEditModal}
+                onCancel={handleCancelSubscription}
+                onDuplicate={handleDuplicateSubscription}
+                onDelete={handleDeleteSubscription}
+                onAddNew={() => setShowAddModal(true)}
+                openMenuId={openMenuId}
+                setOpenMenuId={setOpenMenuId}
               />
             )}
             {activeTab === 'budget' && (
@@ -596,6 +690,32 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Add Subscription Modal */}
+      {showAddModal && (
+        <AddSubscriptionModal 
+          isOpen={showAddModal}
+          onClose={() => {
+            setShowAddModal(false)
+            setEditingSubscription(null)
+          }}
+          onSubmit={handleAddSubscription}
+          initialData={editingSubscription}
+        />
+      )}
+
+      {/* Edit Subscription Modal */}
+      {showEditModal && editingSubscription && (
+        <EditSubscriptionModal 
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false)
+            setEditingSubscription(null)
+          }}
+          onSubmit={handleEditSubscription}
+          subscription={editingSubscription}
+        />
       )}
     </div>
   )
@@ -729,31 +849,12 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
             ))}
           </div>
         </div>
-
-        {/* Next 30 Days Forecast */}
-        <div>
-          <h4 className="text-md font-medium text-gray-900 mb-4">Next 30 Days</h4>
-          <div className="space-y-2">
-            {subscriptions.slice(0, 5).map((sub: Subscription) => (
-              <div key={sub.id} className="flex items-center justify-between py-2 border-b border-gray-100">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-700">{sub.service_name}</span>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">{sub.category}</span>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-medium">{formatCurrency(sub.amount)}</div>
-                  <div className="text-xs text-gray-500">{formatDate(sub.next_charge_date)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   )
 }
 
-function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatDate }: any) {
+function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatDate, onEdit, onCancel, onDuplicate, onDelete, onAddNew, openMenuId, setOpenMenuId }: any) {
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
 
@@ -769,7 +870,16 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
     <div>
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-medium text-gray-900">Your Subscriptions</h3>
-        <div className="flex space-x-4">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={onAddNew}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center space-x-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            <span>Add Subscription</span>
+          </button>
           <select 
             value={filterCategory} 
             onChange={(e) => setFilterCategory(e.target.value)}
@@ -788,6 +898,7 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="trial">Trial</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
       </div>
@@ -803,9 +914,11 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                 <div className="flex items-center space-x-2">
                   <span className="font-medium text-gray-900">{sub.service_name}</span>
                   <span className={`text-xs px-2 py-1 rounded-full ${
-                    sub.status === 'trial' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                    sub.status === 'trial' ? 'bg-yellow-100 text-yellow-800' : 
+                    sub.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                    'bg-green-100 text-green-800'
                   }`}>
-                    {sub.status === 'trial' ? 'Trial Ending' : 'Active'}
+                    {sub.status === 'trial' ? 'Trial' : sub.status === 'cancelled' ? 'Cancelled' : 'Active'}
                   </span>
                 </div>
                 <div className="text-sm text-gray-500">{sub.category}</div>
@@ -821,16 +934,90 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                 <div className="text-xs text-gray-500">Next charge</div>
               </div>
               <div className="flex items-center space-x-2">
-                <button className="p-1 text-gray-400 hover:text-gray-600">
+                <button 
+                  onClick={() => onEdit(sub)}
+                  className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                  title="Edit subscription"
+                >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
-                <button className="p-1 text-gray-400 hover:text-gray-600">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-                  </svg>
-                </button>
+                <div className="relative">
+                  <button 
+                    onClick={() => setOpenMenuId(openMenuId === sub.id ? null : sub.id)}
+                    className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="More actions"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                    </svg>
+                  </button>
+                  {openMenuId === sub.id && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                      <div className="py-1">
+                        <button
+                          onClick={() => {
+                            onEdit(sub)
+                            setOpenMenuId(null)
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            <span>Edit</span>
+                          </div>
+                        </button>
+                        {sub.status !== 'cancelled' && (
+                          <button
+                            onClick={() => {
+                              onCancel(sub.id)
+                              setOpenMenuId(null)
+                            }}
+                            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          >
+                            <div className="flex items-center space-x-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span>Cancel Subscription</span>
+                            </div>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            onDuplicate(sub)
+                            setOpenMenuId(null)
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            <span>Duplicate</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => {
+                            onDelete(sub.id)
+                            setOpenMenuId(null)
+                          }}
+                          className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Delete</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1029,6 +1216,361 @@ function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConver
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+// Add Subscription Modal Component
+function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
+  const [formData, setFormData] = useState({
+    service_name: initialData?.service_name || '',
+    amount: initialData?.amount || '',
+    currency: initialData?.currency || 'USD',
+    frequency: initialData?.frequency || 'monthly',
+    next_charge_date: initialData?.next_charge_date || '',
+    category: initialData?.category || '',
+    status: initialData?.status || 'active'
+  })
+
+  const categories = ['Entertainment', 'Music', 'Productivity', 'Development', 'Design', 'AI Tools', 'Other']
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.service_name || !formData.amount || !formData.next_charge_date) {
+      alert('Please fill in all required fields (Service Name, Amount, Next Charge Date)')
+      return
+    }
+
+    onSubmit({
+      ...formData,
+      amount: parseFloat(formData.amount)
+    })
+  }
+
+  const handleChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900">
+              {initialData?.id ? 'Duplicate Subscription' : 'Add New Subscription'}
+            </h3>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Service Name *
+              </label>
+              <input
+                type="text"
+                value={formData.service_name}
+                onChange={(e) => handleChange('service_name', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Netflix, Spotify"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.amount}
+                  onChange={(e) => handleChange('amount', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="9.99"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Currency
+                </label>
+                <select
+                  value={formData.currency}
+                  onChange={(e) => handleChange('currency', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                  <option value="INR">INR</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Billing Frequency
+              </label>
+              <select
+                value={formData.frequency}
+                onChange={(e) => handleChange('frequency', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+                <option value="weekly">Weekly</option>
+                <option value="one-time">One-time</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Next Charge Date *
+              </label>
+              <input
+                type="date"
+                value={formData.next_charge_date}
+                onChange={(e) => handleChange('next_charge_date', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => handleChange('category', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Category</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Status
+              </label>
+              <select
+                value={formData.status}
+                onChange={(e) => handleChange('status', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="active">Active</option>
+                <option value="trial">Trial</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div className="flex space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {initialData?.id ? 'Duplicate' : 'Add Subscription'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Edit Subscription Modal Component
+function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any) {
+  const [formData, setFormData] = useState({
+    id: subscription?.id || '',
+    service_name: subscription?.service_name || '',
+    amount: subscription?.amount?.toString() || '',
+    currency: subscription?.currency || 'USD',
+    frequency: subscription?.frequency || 'monthly',
+    next_charge_date: subscription?.next_charge_date || '',
+    category: subscription?.category || '',
+    status: subscription?.status || 'active'
+  })
+
+  const categories = ['Entertainment', 'Music', 'Productivity', 'Development', 'Design', 'AI Tools', 'Other']
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.service_name || !formData.amount || !formData.next_charge_date) {
+      alert('Please fill in all required fields (Service Name, Amount, Next Charge Date)')
+      return
+    }
+
+    onSubmit({
+      ...formData,
+      amount: parseFloat(formData.amount)
+    })
+  }
+
+  const handleChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900">Edit Subscription</h3>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Service Name *
+              </label>
+              <input
+                type="text"
+                value={formData.service_name}
+                onChange={(e) => handleChange('service_name', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Netflix, Spotify"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.amount}
+                  onChange={(e) => handleChange('amount', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="9.99"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Currency
+                </label>
+                <select
+                  value={formData.currency}
+                  onChange={(e) => handleChange('currency', e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                  <option value="INR">INR</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Billing Frequency
+              </label>
+              <select
+                value={formData.frequency}
+                onChange={(e) => handleChange('frequency', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+                <option value="weekly">Weekly</option>
+                <option value="one-time">One-time</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Next Charge Date *
+              </label>
+              <input
+                type="date"
+                value={formData.next_charge_date}
+                onChange={(e) => handleChange('next_charge_date', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => handleChange('category', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select Category</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Status
+              </label>
+              <select
+                value={formData.status}
+                onChange={(e) => handleChange('status', e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="active">Active</option>
+                <option value="trial">Trial</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+
+            <div className="flex space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   )
 }

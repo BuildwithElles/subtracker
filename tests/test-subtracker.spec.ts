@@ -16,15 +16,14 @@ test.describe('Subtracker App', () => {
     await page.goto('https://subtracker-ecru.vercel.app/signup');
     await page.fill('input[name="email"]', 'testuser@example.com');
     await page.fill('input[name="password"]', 'password123');
-    await page.click('button:has-text("Sign Up")');
+    await page.click('button[type="submit"]:has-text("Sign Up")');
     // Note: This will likely fail since we don't have dashboard yet
     // await expect(page).toHaveURL(/dashboard/);
   });
 
   test('Connect Gmail prompt is shown', async ({ page }) => {
     await page.goto('https://subtracker-ecru.vercel.app/dashboard');
-    // This will likely 404 since dashboard doesn't exist yet
-    await expect(page.locator('text=Connect Gmail')).toBeVisible();
+    await expect(page.locator('button:has-text("Connect Gmail")')).toBeVisible();
   });
 
   test('Budget setup form validation', async ({ page }) => {
