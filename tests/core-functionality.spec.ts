@@ -27,8 +27,44 @@ test.describe('SubTracker - Core Functionality Tests', () => {
     
     // Check signup form elements
     await expect(page.locator('input[type="email"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.locator('input[id="password"]')).toBeVisible();
+    await expect(page.locator('input[id="confirmPassword"]')).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toBeVisible();
+    
+    // Check optional fields
+    await expect(page.locator('input[id="fullName"]')).toBeVisible();
+    await expect(page.locator('input[id="referrerCode"]')).toBeVisible();
+    
+    // Check Google OAuth button
+    await expect(page.locator('text=Sign up with Google')).toBeVisible();
+  });
+
+  test('Signup form has all required fields and functionality', async ({ page }) => {
+    await page.goto('/signup');
+    
+    // Test that all form fields are present and functional
+    await page.fill('input[id="fullName"]', 'Test User');
+    await page.fill('input[id="email"]', 'test@example.com');
+    await page.fill('input[id="password"]', 'StrongPassword123');
+    await page.fill('input[id="confirmPassword"]', 'StrongPassword123');
+    
+    // Test referrer code field accepts input and converts to uppercase
+    await page.fill('input[id="referrerCode"]', 'test123');
+    const referrerValue = await page.inputValue('input[id="referrerCode"]');
+    expect(referrerValue).toBe('TEST123');
+    
+    // Test password visibility toggles work
+    const passwordField = page.locator('input[id="password"]');
+    const confirmPasswordField = page.locator('input[id="confirmPassword"]');
+    
+    // Initially password fields should be type="password"
+    expect(await passwordField.getAttribute('type')).toBe('password');
+    expect(await confirmPasswordField.getAttribute('type')).toBe('password');
+    
+    // Test that submit button exists and is enabled
+    const submitButton = page.locator('button[type="submit"]');
+    await expect(submitButton).toBeVisible();
+    await expect(submitButton).toBeEnabled();
   });
 
   test('Dashboard loads with expected elements', async ({ page }) => {
