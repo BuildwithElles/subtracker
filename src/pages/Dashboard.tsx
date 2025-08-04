@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
 
 interface Subscription {
   id: string
   service_name: string
   amount: number
+  currency: string // Add currency field
   frequency: string
   next_charge_date: string
   status: string
+  category?: string
+  trial_end_date?: string
 }
 
 interface BudgetProfile {
@@ -16,48 +20,195 @@ interface BudgetProfile {
   fixed_expenses: number
   savings_goal: number
   discretionary_budget: number
+  currency: string // Add currency field
+}
+
+interface ExchangeRates {
+  [key: string]: number
+}
+
+interface UserMetadata {
+  gmail_connected?: boolean
+  preferred_currency?: string
+}
+
+type Currency = 'USD' | 'EUR' | 'GBP' | 'INR'
+
+// Static exchange rates (in practice, fetch from API)
+const EXCHANGE_RATES: ExchangeRates = {
+  'USD_EUR': 0.91,
+  'USD_GBP': 0.79,
+  'USD_INR': 83.25,
+  'EUR_USD': 1.10,
+  'EUR_GBP': 0.87,
+  'EUR_INR': 91.52,
+  'GBP_USD': 1.27,
+  'GBP_EUR': 1.15,
+  'GBP_INR': 105.72,
+  'INR_USD': 0.012,
+  'INR_EUR': 0.011,
+  'INR_GBP': 0.0095,
+}
+
+// Dummy data for initial design
+const dummySubscriptions: Subscription[] = [
+  { id: '1', service_name: 'Netflix', amount: 15.99, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-05', status: 'active', category: 'Entertainment' },
+  { id: '2', service_name: 'Spotify Premium', amount: 9.99, currency: 'EUR', frequency: 'monthly', next_charge_date: '2025-08-08', status: 'active', category: 'Music' },
+  { id: '3', service_name: 'Adobe Creative Cloud', amount: 52.99, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-20', status: 'active', category: 'Productivity' },
+  { id: '4', service_name: 'Notion Pro', amount: 6.50, currency: 'GBP', frequency: 'monthly', next_charge_date: '2025-08-05', status: 'trial', category: 'Productivity', trial_end_date: '2025-08-05' },
+  { id: '5', service_name: 'AWS', amount: 1950.00, currency: 'INR', frequency: 'monthly', next_charge_date: '2025-12-08', status: 'active', category: 'Development' },
+  { id: '6', service_name: 'Figma Pro', amount: 12.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-06', status: 'trial', category: 'Design', trial_end_date: '2025-08-06' },
+  { id: '7', service_name: 'ChatGPT Plus', amount: 20.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-07', status: 'trial', category: 'AI Tools', trial_end_date: '2025-08-07' },
+  { id: '8', service_name: 'GitHub Copilot', amount: 10.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-10', status: 'trial', category: 'Development', trial_end_date: '2025-08-10' }
+]
+
+const dummyBudget: BudgetProfile = {
+  id: '1',
+  monthly_income: 4500,
+  fixed_expenses: 2200,
+  savings_goal: 500,
+  discretionary_budget: 1800,
+  currency: 'USD'
 }
 
 export default function Dashboard() {
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
-  const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
+  const [subscriptions] = useState<Subscription[]>(dummySubscriptions)
+  const [budgetProfile] = useState<BudgetProfile | null>(dummyBudget)
+  const [loading] = useState(false)
+  const [_user, _setUser] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState('overview')
+  const [selectedCurrency, setSelectedCurrency] = useState<Currency>('USD')
+  const [_userMetadata, setUserMetadata] = useState<UserMetadata>({})
+  const [showGmailModal, setShowGmailModal] = useState(false)
+  const [isScanning, setIsScanning] = useState(false)
 
   useEffect(() => {
     checkUser()
-    fetchDashboardData()
+    loadUserPreferences()
+    // fetchDashboardData() // Will implement later
   }, [])
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    setUser(user)
-  }
-
-  const fetchDashboardData = async () => {
-    setLoading(true)
-    try {
-      // Fetch subscriptions
-      const { data: subs } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('status', 'active')
-
-      // Fetch budget profile
-      const { data: budget } = await supabase
-        .from('budget_profiles')
-        .select('*')
-        .single()
-
-      setSubscriptions(subs || [])
-      setBudgetProfile(budget)
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error)
-    } finally {
-      setLoading(false)
+    _setUser(user)
+    
+    if (user?.user_metadata) {
+      setUserMetadata(user.user_metadata)
+      if (!user.user_metadata.gmail_connected) {
+        setShowGmailModal(true)
+      }
+      if (user.user_metadata.preferred_currency) {
+        setSelectedCurrency(user.user_metadata.preferred_currency)
+      }
+    } else if (user) {
+      // First time user, show Gmail modal
+      setShowGmailModal(true)
     }
   }
 
+  const loadUserPreferences = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user?.user_metadata?.preferred_currency) {
+      setSelectedCurrency(user.user_metadata.preferred_currency)
+    }
+  }
+
+  const convertCurrency = (amount: number, fromCurrency: string, toCurrency: string): number => {
+    if (fromCurrency === toCurrency) return amount
+    
+    const rate = EXCHANGE_RATES[`${fromCurrency}_${toCurrency}`]
+    return rate ? amount * rate : amount
+  }
+
+  const formatCurrencyWithConversion = (amount: number, originalCurrency: string): string => {
+    if (originalCurrency === selectedCurrency) {
+      return formatCurrency(amount)
+    }
+    
+    const convertedAmount = convertCurrency(amount, originalCurrency, selectedCurrency)
+    const originalFormatted = formatCurrency(amount, originalCurrency)
+    const convertedFormatted = formatCurrency(convertedAmount, selectedCurrency)
+    
+    return `${originalFormatted} → ${convertedFormatted}`
+  }
+
+  const updateCurrencyPreference = async (currency: Currency) => {
+    setSelectedCurrency(currency)
+    
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase.auth.updateUser({
+        data: { preferred_currency: currency }
+      })
+    }
+  }
+
+  const handleGmailConnect = async () => {
+    // In a real implementation, this would trigger Google OAuth
+    // For now, we'll simulate the connection
+    setShowGmailModal(false)
+    setIsScanning(true)
+    
+    try {
+      // Simulate Gmail scanning
+      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions('mock-access-token')
+      
+      console.log('Parsed trials from Gmail:', parsedTrials)
+      
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.auth.updateUser({
+          data: { gmail_connected: true }
+        })
+        setUserMetadata(prev => ({ ...prev, gmail_connected: true }))
+      }
+      
+      // Show success message with found trials
+      const foundTrials = parsedTrials.length
+      alert(`Gmail connected successfully! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your inbox.`)
+      
+    } catch (error) {
+      console.error('Gmail connection error:', error)
+      alert('Error connecting to Gmail. Please try again.')
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
+  const handleTrialAction = (trialId: string, action: 'review' | 'cancel') => {
+    if (action === 'review') {
+      // In a real app, this would open a detailed subscription view
+      alert(`Reviewing trial subscription: ${trialId}`)
+    } else if (action === 'cancel') {
+      // In a real app, this would trigger cancellation flow
+      const confirmed = confirm('Are you sure you want to cancel this trial?')
+      if (confirmed) {
+        alert(`Trial cancelled: ${trialId}`)
+      }
+    }
+  }
+
+  const handleGmailScan = async () => {
+    setIsScanning(true)
+    
+    try {
+      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions('mock-access-token')
+      
+      console.log('Parsed trials from Gmail:', parsedTrials)
+      
+      // Show success message with found trials
+      const foundTrials = parsedTrials.length
+      alert(`Scan complete! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your Gmail.`)
+      
+    } catch (error) {
+      console.error('Gmail scan error:', error)
+      alert('Error scanning Gmail. Please try again.')
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
+  // Calculate metrics
   const calculateTotalSpend = () => {
     return subscriptions.reduce((total, sub) => {
       const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
@@ -65,27 +216,72 @@ export default function Dashboard() {
     }, 0)
   }
 
-  const calculateSafeToSpend = () => {
-    if (!budgetProfile) return 0
-    const totalSpend = calculateTotalSpend()
-    const remaining = budgetProfile.discretionary_budget - totalSpend
-    return Math.max(0, remaining / 30) // Daily safe to spend
+  const getTrialsEnding = () => {
+    const today = new Date()
+    const threeDaysFromNow = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000)
+    return subscriptions.filter(sub => 
+      sub.status === 'trial' && 
+      sub.trial_end_date && 
+      new Date(sub.trial_end_date) >= today &&
+      new Date(sub.trial_end_date) <= threeDaysFromNow
+    )
   }
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+  const getUpcomingCharges = () => {
+    const today = new Date()
+    const sevenDaysFromNow = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)
+    return subscriptions.filter(sub => {
+      const chargeDate = new Date(sub.next_charge_date)
+      return chargeDate >= today && chargeDate <= sevenDaysFromNow
+    })
+  }
+
+  const getBudgetUsage = () => {
+    if (!budgetProfile) return 0
+    const totalSpend = calculateTotalSpend()
+    return Math.min((totalSpend / budgetProfile.discretionary_budget) * 100, 100)
+  }
+
+  const getSpendingByCategory = () => {
+    const categorySpend: { [key: string]: number } = {}
+    subscriptions.forEach(sub => {
+      const category = sub.category || 'Other'
+      const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
+      categorySpend[category] = (categorySpend[category] || 0) + monthlyAmount
+    })
+    return Object.entries(categorySpend).map(([category, amount]) => ({ category, amount }))
+  }
+
+  const formatCurrency = (amount: number, currency: string = selectedCurrency) => {
+    const currencyLocales: { [key: string]: string } = {
+      'USD': 'en-US',
+      'EUR': 'de-DE',
+      'GBP': 'en-GB',
+      'INR': 'en-IN'
+    }
+    
+    return new Intl.NumberFormat(currencyLocales[currency] || 'en-US', {
       style: 'currency',
-      currency: 'USD'
+      currency: currency
     }).format(amount)
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    })
+    const date = new Date(dateString)
+    const today = new Date()
+    const diffTime = date.getTime() - today.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    if (diffDays === 0) return 'Today'
+    if (diffDays === 1) return 'Tomorrow'
+    if (diffDays < 7) return `In ${diffDays} days`
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
+
+  const trialsEnding = getTrialsEnding()
+  const upcomingCharges = getUpcomingCharges()
+  const budgetUsage = getBudgetUsage()
+  const spendingByCategory = getSpendingByCategory()
 
   if (loading) {
     return (
@@ -103,159 +299,713 @@ export default function Dashboard() {
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                Welcome back, {user?.email}
-              </span>
-              <button
-                onClick={() => supabase.auth.signOut()}
-                className="text-gray-600 hover:text-gray-900 text-sm"
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold text-sm">S</span>
+                </div>
+                <h1 className="text-xl font-bold text-gray-900">SubTracker</h1>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              {/* Gmail Scan Button */}
+              <button 
+                onClick={handleGmailScan}
+                disabled={isScanning}
+                className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
               >
-                Sign Out
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>{isScanning ? 'Scanning...' : 'Scan Gmail'}</span>
+              </button>
+
+              {/* Currency Selector */}
+              <div className="relative">
+                <select 
+                  value={selectedCurrency} 
+                  onChange={(e) => updateCurrencyPreference(e.target.value as Currency)}
+                  className="appearance-none bg-white border border-gray-300 rounded-md pl-3 pr-8 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="INR">INR (₹)</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+              
+              <button className="p-2 text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {/* Total Spend Card */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Total Spend</h3>
-            <p className="text-3xl font-bold text-red-600">
-              {formatCurrency(calculateTotalSpend())}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">Monthly recurring</p>
-          </div>
-
-          {/* Safe to Spend Card */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Safe to Spend</h3>
-            <p className="text-3xl font-bold text-green-600">
-              {formatCurrency(calculateSafeToSpend())}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">Per day</p>
-          </div>
-
-          {/* Active Subscriptions Card */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Active Subscriptions</h3>
-            <p className="text-3xl font-bold text-blue-600">
-              {subscriptions.length}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">Services</p>
-          </div>
-        </div>
-
-        {/* Connect Gmail CTA */}
-        {subscriptions.length === 0 && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Trial Alert Banner */}
+        {trialsEnding.length > 0 && (
+          <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
             <div className="flex items-center">
               <div className="flex-shrink-0">
-                <svg className="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
               </div>
-              <div className="ml-4 flex-1">
-                <h3 className="text-lg font-medium text-blue-900">Connect Gmail</h3>
-                <p className="text-blue-700 mt-1">
-                  Connect your Gmail account to automatically track subscription emails and charges.
-                </p>
-                <button className="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                  Connect Gmail
-                </button>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">
+                  {trialsEnding.length} trial{trialsEnding.length > 1 ? 's' : ''} ending in the next 3 days
+                </h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <div className="space-y-1">
+                    {trialsEnding.map((trial: Subscription) => (
+                      <div key={trial.id} className="flex items-center justify-between">
+                        <span>
+                          <strong>{trial.service_name}</strong> - {formatCurrencyWithConversion(trial.amount, trial.currency)} on {formatDate(trial.trial_end_date || '')}
+                        </span>
+                        <button 
+                          className="ml-4 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium"
+                          onClick={() => handleTrialAction(trial.id, 'review')}
+                        >
+                          Review
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Subscriptions List */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">Your Subscriptions</h2>
+        {/* Top Metric Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Monthly Spend */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-600">Monthly Spend</h3>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              </svg>
+            </div>
+            <div className="text-2xl font-bold text-gray-900">{formatCurrency(calculateTotalSpend())}</div>
+            <p className="text-xs text-gray-500 mt-1">{subscriptions.length} active subscriptions</p>
           </div>
-          <div className="overflow-hidden" data-test="subscriptions-list">
-            {subscriptions.length > 0 ? (
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Service
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Frequency
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Next Charge
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {subscriptions.map((sub) => (
-                    <tr key={sub.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {sub.service_name}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {formatCurrency(sub.amount)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900 capitalize">
-                          {sub.frequency}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {formatDate(sub.next_charge_date)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                          {sub.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="text-center py-12">
-                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No subscriptions found</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Connect Gmail to automatically discover your subscriptions.
-                </p>
-              </div>
-            )}
+
+          {/* Budget Usage */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-600">Budget Usage</h3>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <div className="text-2xl font-bold text-gray-900">{Math.round(budgetUsage)}%</div>
+            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+              <div 
+                className={`h-2 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                style={{ width: `${budgetUsage}%` }}
+              ></div>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile?.discretionary_budget || 0)} limit</p>
+          </div>
+
+          {/* Trials Ending */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-600">Trials Ending</h3>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <div className="flex items-center space-x-2">
+              <div className="text-2xl font-bold text-gray-900">{trialsEnding.length}</div>
+              {trialsEnding.length > 0 && (
+                <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">Notion Pro</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Next 7 days</p>
+          </div>
+
+          {/* Upcoming Charges */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-600">Upcoming Charges</h3>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div className="text-2xl font-bold text-gray-900">{upcomingCharges.length}</div>
+            <p className="text-xs text-gray-500 mt-1">Next 7 days</p>
           </div>
         </div>
 
-        {/* AI Insights Placeholder */}
-        <div className="mt-8 bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">AI Insights</h2>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-gray-600 text-sm">
-              💡 AI-powered insights about your spending patterns will appear here once you have subscription data.
-            </p>
+        {/* Tabs */}
+        <div className="bg-white rounded-lg shadow-sm border">
+          {/* Tab Navigation */}
+          <div className="border-b border-gray-200">
+            <nav className="flex space-x-8 px-6" aria-label="Tabs">
+              {[
+                { id: 'overview', name: 'Overview' },
+                { id: 'subscriptions', name: 'Subscriptions' },
+                { id: 'budget', name: 'Budget' },
+                { id: 'upcoming', name: 'Upcoming' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === tab.id
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  {tab.name}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-6">
+            {activeTab === 'overview' && (
+              <OverviewTab 
+                budgetProfile={budgetProfile}
+                subscriptions={subscriptions}
+                trialsEnding={trialsEnding}
+                upcomingCharges={upcomingCharges}
+                spendingByCategory={spendingByCategory}
+                formatCurrency={formatCurrency}
+                formatCurrencyWithConversion={formatCurrencyWithConversion}
+                formatDate={formatDate}
+                handleTrialAction={handleTrialAction}
+              />
+            )}
+            {activeTab === 'subscriptions' && (
+              <SubscriptionsTab 
+                subscriptions={subscriptions}
+                formatCurrencyWithConversion={formatCurrencyWithConversion}
+                formatDate={formatDate}
+              />
+            )}
+            {activeTab === 'budget' && (
+              <BudgetTab 
+                budgetProfile={budgetProfile}
+                totalSpend={calculateTotalSpend()}
+                spendingByCategory={spendingByCategory}
+                formatCurrency={formatCurrency}
+              />
+            )}
+            {activeTab === 'upcoming' && (
+              <UpcomingTab 
+                upcomingCharges={upcomingCharges}
+                formatCurrency={formatCurrency}
+                formatCurrencyWithConversion={formatCurrencyWithConversion}
+                formatDate={formatDate}
+              />
+            )}
           </div>
         </div>
       </main>
+
+      {/* Gmail Consent Modal */}
+      {showGmailModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center mb-4">
+                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Connect Your Gmail</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  We use limited access to your Gmail to detect billing-related subscriptions and receipts only.
+                </p>
+                <ul className="text-left text-sm text-gray-600 mb-6 space-y-2">
+                  <li className="flex items-center">
+                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    Read-only inbox access
+                  </li>
+                  <li className="flex items-center">
+                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    Only scans emails with keywords like "receipt", "invoice", "subscription"
+                  </li>
+                  <li className="flex items-center">
+                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    You can disconnect at any time
+                  </li>
+                </ul>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => setShowGmailModal(false)}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  >
+                    Maybe Later
+                  </button>
+                  <button
+                    onClick={handleGmailConnect}
+                    disabled={isScanning}
+                    className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    {isScanning ? 'Connecting...' : 'Continue with Gmail'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Tab Components
+function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharges, spendingByCategory, formatCurrency, formatCurrencyWithConversion, formatDate, handleTrialAction }: any) {
+  const totalSpend = subscriptions.reduce((total: number, sub: Subscription) => {
+    const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
+    return total + monthlyAmount
+  }, 0)
+
+  const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
+  const dailyAllowance = remainingBudget / 30
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Left: Budget Overview */}
+      <div className="lg:col-span-1">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Budget Overview</h3>
+        <div className="space-y-4">
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-gray-600">Monthly Income</span>
+            <span className="font-medium">{formatCurrency(budgetProfile?.monthly_income || 0)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-gray-600">Fixed Expenses</span>
+            <span className="font-medium">-{formatCurrency(budgetProfile?.fixed_expenses || 0)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-gray-600">Subscriptions</span>
+            <span className="font-medium">-{formatCurrency(totalSpend)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-gray-600">Discretionary</span>
+            <span className="font-medium">{formatCurrency(budgetProfile?.discretionary_budget || 0)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 pt-4 border-t-2">
+            <span className="text-gray-900 font-medium">Remaining Budget</span>
+            <span className={`font-bold ${remainingBudget >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {formatCurrency(remainingBudget)}
+            </span>
+          </div>
+          <div className="bg-green-50 p-3 rounded-lg">
+            <div className="text-sm text-green-800">Daily Allowance</div>
+            <div className="text-lg font-bold text-green-900">{formatCurrency(dailyAllowance)}</div>
+          </div>
+        </div>
+
+        {/* Spending by Category Pie Chart */}
+        <div className="mt-8">
+          <h4 className="text-md font-medium text-gray-900 mb-4">Spending by Category</h4>
+          <div className="space-y-2">
+            {spendingByCategory.map((item: any, index: number) => {
+              const colors = ['bg-green-500', 'bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500']
+              return (
+                <div key={item.category} className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${colors[index % colors.length]}`}></div>
+                    <span className="text-sm text-gray-700">{item.category}</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatCurrency(item.amount)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Trials and Upcoming */}
+      <div className="lg:col-span-2 space-y-6">
+        {/* Trial Ending Soon */}
+        {trialsEnding.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center space-x-2 mb-2">
+              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <h4 className="text-red-900 font-medium">Trial Ending Soon</h4>
+            </div>
+            {trialsEnding.map((trial: Subscription) => (
+              <div key={trial.id} className="flex items-center justify-between mb-3 last:mb-0">
+                <div className="flex-1">
+                  <div className="font-medium text-red-900">{trial.service_name}</div>
+                  <div className="text-sm text-red-700">
+                    Will charge {formatCurrencyWithConversion(trial.amount, trial.currency)} on {formatDate(trial.trial_end_date || '')}
+                  </div>
+                  <div className="text-xs text-red-600 mt-1">
+                    Trial ends {formatDate(trial.trial_end_date || '')} • {trial.category}
+                  </div>
+                </div>
+                <div className="flex space-x-2">
+                  <button 
+                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors"
+                    onClick={() => handleTrialAction(trial.id, 'review')}
+                  >
+                    Review
+                  </button>
+                  <button 
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-colors"
+                    onClick={() => handleTrialAction(trial.id, 'cancel')}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upcoming Charges */}
+        <div>
+          <h4 className="text-md font-medium text-gray-900 mb-4">Upcoming Charges</h4>
+          <div className="space-y-3">
+            {upcomingCharges.slice(0, 5).map((charge: Subscription) => (
+              <div key={charge.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+                    <span className="text-gray-600 font-medium text-sm">{charge.service_name[0]}</span>
+                  </div>
+                  <div>
+                    <div className="font-medium text-gray-900">{charge.service_name}</div>
+                    <div className="text-sm text-gray-500">{charge.category}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-medium text-gray-900">{formatCurrency(charge.amount)}</div>
+                  <div className="text-sm text-gray-500">{formatDate(charge.next_charge_date)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Next 30 Days Forecast */}
+        <div>
+          <h4 className="text-md font-medium text-gray-900 mb-4">Next 30 Days</h4>
+          <div className="space-y-2">
+            {subscriptions.slice(0, 5).map((sub: Subscription) => (
+              <div key={sub.id} className="flex items-center justify-between py-2 border-b border-gray-100">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-700">{sub.service_name}</span>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">{sub.category}</span>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-medium">{formatCurrency(sub.amount)}</div>
+                  <div className="text-xs text-gray-500">{formatDate(sub.next_charge_date)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatDate }: any) {
+  const [filterCategory, setFilterCategory] = useState('all')
+  const [filterStatus, setFilterStatus] = useState('all')
+
+  const categories = ['all', ...Array.from(new Set(subscriptions.map((sub: Subscription) => sub.category || 'Other')))] as string[]
+
+  const filteredSubscriptions = subscriptions.filter((sub: Subscription) => {
+    const categoryMatch = filterCategory === 'all' || sub.category === filterCategory
+    const statusMatch = filterStatus === 'all' || sub.status === filterStatus
+    return categoryMatch && statusMatch
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-lg font-medium text-gray-900">Your Subscriptions</h3>
+        <div className="flex space-x-4">
+          <select 
+            value={filterCategory} 
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+          >
+            <option value="all">All Categories</option>
+            {categories.slice(1).map((cat: string) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+          <select 
+            value={filterStatus} 
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="border border-gray-300 rounded-md px-3 py-1 text-sm"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="trial">Trial</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {filteredSubscriptions.map((sub: Subscription) => (
+          <div key={sub.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100">
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-white rounded-lg border flex items-center justify-center">
+                <span className="font-medium text-gray-700">{sub.service_name[0]}</span>
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-medium text-gray-900">{sub.service_name}</span>
+                  <span className={`text-xs px-2 py-1 rounded-full ${
+                    sub.status === 'trial' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'
+                  }`}>
+                    {sub.status === 'trial' ? 'Trial Ending' : 'Active'}
+                  </span>
+                </div>
+                <div className="text-sm text-gray-500">{sub.category}</div>
+              </div>
+            </div>
+            <div className="flex items-center space-x-6">
+              <div className="text-right">
+                <div className="font-medium text-gray-900">{formatCurrencyWithConversion(sub.amount, sub.currency)}</div>
+                <div className="text-sm text-gray-500 capitalize">{sub.frequency}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm text-gray-900">{formatDate(sub.next_charge_date)}</div>
+                <div className="text-xs text-gray-500">Next charge</div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button className="p-1 text-gray-400 hover:text-gray-600">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <button className="p-1 text-gray-400 hover:text-gray-600">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurrency }: any) {
+  const budgetUsage = budgetProfile ? (totalSpend / budgetProfile.discretionary_budget) * 100 : 0
+  const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
+  const dailyAllowance = remainingBudget / 30
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      {/* Left: Budget Details */}
+      <div>
+        <h3 className="text-lg font-medium text-gray-900 mb-6">Monthly Budget</h3>
+        
+        <div className="space-y-6">
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="text-sm text-blue-600 font-medium">Monthly Income</div>
+            <div className="text-2xl font-bold text-blue-900">{formatCurrency(budgetProfile?.monthly_income || 0)}</div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
+              <span className="text-gray-700">Fixed Expenses</span>
+              <span className="font-medium text-red-600">{formatCurrency(budgetProfile?.fixed_expenses || 0)}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
+              <span className="text-gray-700">Subscriptions</span>
+              <span className="font-medium text-red-600">{formatCurrency(totalSpend)}</span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
+              <span className="text-gray-700">Discretionary</span>
+              <span className="font-medium text-green-600">{formatCurrency(budgetProfile?.discretionary_budget || 0)}</span>
+            </div>
+          </div>
+
+          <div className="bg-green-50 p-4 rounded-lg border-t-4 border-green-500">
+            <div className="text-sm text-green-600 font-medium">Remaining Budget</div>
+            <div className={`text-2xl font-bold ${remainingBudget >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+              {formatCurrency(remainingBudget)}
+            </div>
+            <div className="text-sm text-green-600 mt-1">
+              {formatCurrency(dailyAllowance)} per day
+            </div>
+          </div>
+        </div>
+
+        {/* Subscription Budget Usage */}
+        <div className="mt-8">
+          <h4 className="text-md font-medium text-gray-900 mb-4">Subscription Budget Usage</h4>
+          <div className="bg-gray-200 rounded-full h-4">
+            <div 
+              className={`h-4 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+              style={{ width: `${Math.min(budgetUsage, 100)}%` }}
+            ></div>
+          </div>
+          <div className="flex justify-between text-sm text-gray-600 mt-2">
+            <span>Current Spend: {formatCurrency(totalSpend)}</span>
+            <span>{Math.round(budgetUsage)}% of recommended limit</span>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {formatCurrency(budgetProfile?.discretionary_budget || 0)} limit
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Spending Breakdown */}
+      <div>
+        <h3 className="text-lg font-medium text-gray-900 mb-6">Spending by Category</h3>
+        
+        <div className="space-y-4">
+          {spendingByCategory.map((item: any, index: number) => {
+            const colors = ['bg-green-500', 'bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500']
+            const percentage = totalSpend > 0 ? (item.amount / totalSpend) * 100 : 0
+            
+            return (
+              <div key={item.category} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-4 h-4 rounded ${colors[index % colors.length]}`}></div>
+                    <span className="text-gray-700">{item.category}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-medium">{formatCurrency(item.amount)}</div>
+                    <div className="text-xs text-gray-500">{Math.round(percentage)}%</div>
+                  </div>
+                </div>
+                <div className="bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${colors[index % colors.length]}`}
+                    style={{ width: `${percentage}%` }}
+                  ></div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Daily Allowance Breakdown */}
+        <div className="mt-8 bg-gray-50 p-4 rounded-lg">
+          <h4 className="text-md font-medium text-gray-900 mb-3">Daily Allowance</h4>
+          <div className="text-2xl font-bold text-gray-900">{formatCurrency(dailyAllowance)}</div>
+          <div className="text-sm text-gray-600 mt-1">
+            Available for daily discretionary spending
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConversion, formatDate }: any) {
+  const groupedCharges = upcomingCharges.reduce((acc: any, charge: Subscription) => {
+    const date = charge.next_charge_date
+    if (!acc[date]) acc[date] = []
+    acc[date].push(charge)
+    return acc
+  }, {})
+
+  const sortedDates = Object.keys(groupedCharges).sort((a, b) => 
+    new Date(a).getTime() - new Date(b).getTime()
+  )
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h3 className="text-lg font-medium text-gray-900">Upcoming Charges</h3>
+        <p className="text-gray-600">Subscriptions with charges due in the next 7 days</p>
+      </div>
+
+      {sortedDates.length > 0 ? (
+        <div className="space-y-6">
+          {sortedDates.map(date => (
+            <div key={date}>
+              <div className="mb-3">
+                <h4 className="text-md font-medium text-gray-900">{formatDate(date)}</h4>
+                <div className="text-sm text-gray-500">
+                  {groupedCharges[date].length} charge{groupedCharges[date].length !== 1 ? 's' : ''}
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                {groupedCharges[date].map((charge: Subscription) => (
+                  <div key={charge.id} className="flex items-center justify-between p-4 bg-white border rounded-lg shadow-sm">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <span className="font-medium text-gray-700">{charge.service_name[0]}</span>
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-900">{charge.service_name}</div>
+                        <div className="text-sm text-gray-500">{charge.category}</div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <div className="font-medium text-gray-900">{formatCurrencyWithConversion(charge.amount, charge.currency)}</div>
+                        <div className="text-sm text-gray-500 capitalize">{charge.frequency}</div>
+                      </div>
+                      
+                      <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                        formatDate(charge.next_charge_date) === 'Today' ? 'bg-red-100 text-red-800' :
+                        formatDate(charge.next_charge_date) === 'Tomorrow' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
+                        {formatDate(charge.next_charge_date)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <div className="text-sm text-blue-800">
+              <strong>Total this week:</strong> {formatCurrency(
+                upcomingCharges.reduce((total: number, charge: Subscription) => total + charge.amount, 0)
+              )} <span className="text-xs">(USD equivalent)</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No upcoming charges</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            You don't have any subscription charges due in the next 7 days.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
