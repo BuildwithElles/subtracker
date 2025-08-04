@@ -15,6 +15,7 @@ export default function Budget() {
   const [fixedCosts, setFixedCosts] = useState('')
   const [savingsTarget, setSavingsTarget] = useState('')
   const [loading, setLoading] = useState(false)
+  const [userLoading, setUserLoading] = useState(true)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
   const [user, setUser] = useState<any>(null)
@@ -22,19 +23,41 @@ export default function Budget() {
 
   useEffect(() => {
     checkUser()
-    loadExistingBudget()
   }, [])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    setUser(user)
+    try {
+      setUserLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      
+      if (!user) {
+        setError('You must be logged in to access this page. Redirecting to login...')
+        setTimeout(() => navigate('/'), 2000)
+        return
+      }
+      
+      // Load existing budget after user is confirmed
+      await loadExistingBudget(user.id)
+    } catch (error) {
+      console.error('Error checking user:', error)
+      setError('Authentication error. Please try logging in again.')
+    } finally {
+      setUserLoading(false)
+    }
   }
 
-  const loadExistingBudget = async () => {
+  const loadExistingBudget = async (userId?: string) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const targetUserId = userId || user?.id
+      
+      if (!targetUserId) return
+
       const { data } = await supabase
         .from('budget_profiles')
         .select('*')
+        .eq('user_id', targetUserId)
         .single()
 
       if (data) {
@@ -43,7 +66,8 @@ export default function Budget() {
         // The monthly_budget field represents the total discretionary budget
       }
     } catch (error) {
-      // No existing budget profile
+      // No existing budget profile or error loading
+      console.log('No existing budget found or error:', error)
     }
   }
 
@@ -52,6 +76,13 @@ export default function Budget() {
     setLoading(true)
     setError('')
     setSuccess(false)
+
+    // Check if user is authenticated
+    if (!user?.id) {
+      setError('You must be logged in to save budget data. Please refresh and try again.')
+      setLoading(false)
+      return
+    }
 
     const incomeNum = parseFloat(income)
     const fixedNum = parseFloat(fixedCosts)
@@ -86,12 +117,6 @@ export default function Budget() {
     }
 
     try {
-      if (!user?.id) {
-        setError('You must be logged in to save budget data')
-        setLoading(false)
-        return
-      }
-
       const budgetData: BudgetProfile = {
         user_id: user.id,
         monthly_budget: monthlyBudget,
@@ -133,6 +158,18 @@ export default function Budget() {
   }
 
   const monthlyBudget = parseFloat(income || '0') - parseFloat(fixedCosts || '0') - parseFloat(savingsTarget || '0')
+
+  // Show loading state while checking user authentication
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
