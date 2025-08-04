@@ -66,7 +66,7 @@ export default function Dashboard() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(dummySubscriptions)
   const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
   const [loading, setLoading] = useState(false)
-  const [_user, _setUser] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>('USD')
   const [_userMetadata, setUserMetadata] = useState<UserMetadata>({})
@@ -75,6 +75,8 @@ export default function Dashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null)
+  const [showTrialConversionModal, setShowTrialConversionModal] = useState(false)
+  const [convertingTrial, setConvertingTrial] = useState<Subscription | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -94,7 +96,7 @@ export default function Dashboard() {
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    _setUser(user)
+    setCurrentUser(user)
     
     if (user?.user_metadata) {
       setUserMetadata(user.user_metadata)
@@ -204,17 +206,47 @@ export default function Dashboard() {
     }
   }
 
-  const handleTrialAction = (trialId: string, action: 'review' | 'cancel') => {
-    if (action === 'review') {
-      // In a real app, this would open a detailed subscription view
-      alert(`Reviewing trial subscription: ${trialId}`)
+  const handleTrialAction = (trialId: string, action: 'start' | 'cancel') => {
+    const trial = subscriptions.find(sub => sub.id === trialId)
+    if (!trial) return
+
+    if (action === 'start') {
+      // Open conversion modal with pre-filled trial data
+      setConvertingTrial(trial)
+      setShowTrialConversionModal(true)
     } else if (action === 'cancel') {
-      // In a real app, this would trigger cancellation flow
-      const confirmed = confirm('Are you sure you want to cancel this trial?')
+      // Open external cancellation link or support email
+      const supportEmail = 'support@' + trial.service_name.toLowerCase().replace(/\s+/g, '') + '.com'
+      const cancellationUrl = `https://${trial.service_name.toLowerCase().replace(/\s+/g, '')}.com/cancel`
+      
+      const confirmed = confirm(`Are you sure you want to cancel your ${trial.service_name} trial?\n\nClick OK to visit the cancellation page, or contact support at ${supportEmail}`)
       if (confirmed) {
-        alert(`Trial cancelled: ${trialId}`)
+        // Try to open the cancellation URL, fallback to email
+        window.open(cancellationUrl, '_blank')
       }
     }
+  }
+
+  const handleTrialConversion = (trialData: any) => {
+    const newSubscription: Subscription = {
+      ...trialData,
+      id: Date.now().toString(), // Generate new ID
+      status: 'active',
+      trial_end_date: undefined, // Remove trial end date
+      next_charge_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Set next charge to 30 days from now
+    }
+
+    // Add to subscriptions and remove from trials
+    setSubscriptions(prev => [
+      ...prev.filter(sub => sub.id !== convertingTrial?.id), // Remove the trial
+      newSubscription // Add as active subscription
+    ])
+
+    // Close modal and reset state
+    setShowTrialConversionModal(false)
+    setConvertingTrial(null)
+    
+    alert(`Successfully started ${newSubscription.service_name} subscription!`)
   }
 
   const handleGmailScan = async () => {
@@ -378,6 +410,75 @@ export default function Dashboard() {
     }).format(amount)
   }
 
+  const generateWelcomeMessage = () => {
+    const totalSpend = calculateTotalSpend()
+    const activeSubscriptions = subscriptions.length
+    const trialsEndingCount = getTrialsEnding().length
+    const upcomingChargesCount = getUpcomingCharges().length
+    const budgetUsagePercent = getBudgetUsage()
+    
+    // Get current time for time-based greeting
+    const currentHour = new Date().getHours()
+    const timeGreeting = currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening'
+    
+    // Generate user name from email
+    const userName = currentUser?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'Demo User'
+    const displayName = currentUser ? userName.charAt(0).toUpperCase() + userName.slice(1) : 'Demo User'
+    
+    // Generate AI-powered insights
+    let insight = ''
+    let mood = 'positive' // positive, neutral, warning
+    
+    if (trialsEndingCount > 0) {
+      insight = `You have ${trialsEndingCount} trial${trialsEndingCount > 1 ? 's' : ''} ending soon. `
+      mood = 'warning'
+      if (trialsEndingCount > 2) {
+        insight += "Time to make some decisions to avoid unexpected charges!"
+      } else {
+        insight += "Perfect time to review and decide what's worth keeping."
+      }
+    } else if (budgetUsagePercent > 85) {
+      insight = `You're at ${Math.round(budgetUsagePercent)}% of your monthly budget. `
+      mood = 'warning'
+      insight += "Consider reviewing your subscriptions to stay on track."
+    } else if (budgetUsagePercent > 70) {
+      insight = `You're at ${Math.round(budgetUsagePercent)}% of your monthly budget. `
+      mood = 'neutral'
+      insight += "You're doing well but keep an eye on upcoming charges."
+    } else if (activeSubscriptions === 0) {
+      insight = "Ready to take control of your subscriptions? Start by adding your current services."
+      mood = 'positive'
+    } else if (activeSubscriptions < 5) {
+      insight = `You're managing ${activeSubscriptions} subscription${activeSubscriptions > 1 ? 's' : ''} efficiently. `
+      mood = 'positive'
+      insight += "Great job keeping things lean!"
+    } else if (activeSubscriptions < 10) {
+      insight = `You have ${activeSubscriptions} active subscriptions totaling ${formatCurrency(totalSpend)} monthly. `
+      mood = 'neutral'
+      insight += "You're in good control of your spending."
+    } else {
+      insight = `Wow! You're managing ${activeSubscriptions} subscriptions. `
+      mood = 'neutral'
+      insight += "That's quite a digital lifestyle - make sure each one adds value."
+    }
+    
+    // Add spending trend insight
+    if (totalSpend > 0) {
+      const avgPerService = totalSpend / activeSubscriptions
+      if (avgPerService > 20) {
+        insight += ` Your average spend per service is ${formatCurrency(avgPerService)} - you prefer premium tools.`
+      } else if (avgPerService < 5) {
+        insight += ` At ${formatCurrency(avgPerService)} average per service, you're great at finding deals!`
+      }
+    }
+    
+    return {
+      greeting: `${timeGreeting}, ${displayName}! 👋`,
+      insight,
+      mood
+    }
+  }
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
     const today = new Date()
@@ -486,40 +587,82 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Trial Alert Banner */}
-        {trialsEnding.length > 0 && (
-          <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">
-                  {trialsEnding.length} trial{trialsEnding.length > 1 ? 's' : ''} ending in the next 3 days
-                </h3>
-                <div className="mt-2 text-sm text-red-700">
-                  <div className="space-y-1">
-                    {trialsEnding.map((trial: Subscription) => (
-                      <div key={trial.id} className="flex items-center justify-between">
-                        <span>
-                          <strong>{trial.service_name}</strong> - {formatCurrencyWithConversion(trial.amount, trial.currency)} on {formatDate(trial.trial_end_date || '')}
+        {/* Welcome Back Section */}
+        {(() => {
+          const welcomeData = generateWelcomeMessage()
+          return (
+            <div className={`mb-6 rounded-lg p-6 ${
+              welcomeData.mood === 'warning' ? 'bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200' :
+              welcomeData.mood === 'neutral' ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200' :
+              'bg-gradient-to-r from-green-50 to-blue-50 border border-green-200'
+            }`}>
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <h2 className={`text-xl font-semibold mb-2 ${
+                    welcomeData.mood === 'warning' ? 'text-orange-800' :
+                    welcomeData.mood === 'neutral' ? 'text-blue-800' :
+                    'text-green-800'
+                  }`}>
+                    {welcomeData.greeting}
+                  </h2>
+                  <p className={`text-sm leading-relaxed ${
+                    welcomeData.mood === 'warning' ? 'text-orange-700' :
+                    welcomeData.mood === 'neutral' ? 'text-blue-700' :
+                    'text-green-700'
+                  }`}>
+                    {welcomeData.insight}
+                  </p>
+                  {/* Quick Stats */}
+                  <div className="flex items-center space-x-6 mt-4">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        welcomeData.mood === 'warning' ? 'bg-orange-400' :
+                        welcomeData.mood === 'neutral' ? 'bg-blue-400' :
+                        'bg-green-400'
+                      }`}></div>
+                      <span className={`text-xs font-medium ${
+                        welcomeData.mood === 'warning' ? 'text-orange-600' :
+                        welcomeData.mood === 'neutral' ? 'text-blue-600' :
+                        'text-green-600'
+                      }`}>
+                        {subscriptions.length} Active • {formatCurrency(calculateTotalSpend())} Monthly
+                      </span>
+                    </div>
+                    {budgetProfile && (
+                      <div className="flex items-center space-x-2">
+                        <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <span className="text-xs text-gray-600">
+                          {Math.round(getBudgetUsage())}% of budget used
                         </span>
-                        <button 
-                          className="ml-4 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-medium"
-                          onClick={() => handleTrialAction(trial.id, 'review')}
-                        >
-                          Review
-                        </button>
                       </div>
-                    ))}
+                    )}
                   </div>
+                </div>
+                <div className={`ml-4 p-3 rounded-full ${
+                  welcomeData.mood === 'warning' ? 'bg-orange-100' :
+                  welcomeData.mood === 'neutral' ? 'bg-blue-100' :
+                  'bg-green-100'
+                }`}>
+                  {welcomeData.mood === 'warning' ? (
+                    <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  ) : welcomeData.mood === 'neutral' ? (
+                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Top Metric Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -562,7 +705,9 @@ export default function Dashboard() {
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
                   <div className="h-2 rounded-full bg-gray-300" style={{ width: '0%' }}></div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Set up your budget to track usage</p>
+                <Link to="/budget" className="text-xs text-blue-600 hover:text-blue-800 mt-1 inline-block hover:underline">
+                  Set up your budget to track usage
+                </Link>
               </>
             )}
           </div>
@@ -755,6 +900,19 @@ export default function Dashboard() {
           subscription={editingSubscription}
         />
       )}
+
+      {/* Trial Conversion Modal */}
+      {showTrialConversionModal && convertingTrial && (
+        <TrialConversionModal 
+          isOpen={showTrialConversionModal}
+          onClose={() => {
+            setShowTrialConversionModal(false)
+            setConvertingTrial(null)
+          }}
+          onConvert={handleTrialConversion}
+          trial={convertingTrial}
+        />
+      )}
     </div>
   )
 }
@@ -767,7 +925,36 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
   }, 0)
 
   const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
-  const dailyAllowance = remainingBudget / 30
+  
+  // Calculate safe to spend with enhanced logic
+  const today = new Date()
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+  const dayOfMonth = today.getDate()
+  const daysRemaining = daysInMonth - dayOfMonth + 1
+  
+  // Safe daily spend calculation
+  const safeToSpendDaily = remainingBudget / daysRemaining
+  
+  // Determine if overspending (comparing against original daily allowance)
+  const isOverspending = safeToSpendDaily < (remainingBudget / 30) * 0.8 // 20% buffer
+  const isUnderspending = safeToSpendDaily > (remainingBudget / 30) * 1.2 // 20% buffer
+  
+  // Color and message logic
+  const getSafeSpendColor = () => {
+    if (remainingBudget <= 0) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (isOverspending) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (isUnderspending) return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
+    return { bg: 'bg-yellow-50', text: 'text-yellow-800', amount: 'text-yellow-900' }
+  }
+  
+  const getSafeSpendMessage = () => {
+    if (remainingBudget <= 0) return "Budget Exceeded"
+    if (isOverspending) return "Reduce Spending"
+    if (isUnderspending) return "Safe to Spend"
+    return "On Track"
+  }
+  
+  const safeSpendColors = getSafeSpendColor()
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -797,9 +984,16 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
               {formatCurrency(remainingBudget)}
             </span>
           </div>
-          <div className="bg-green-50 p-3 rounded-lg">
-            <div className="text-sm text-green-800">Daily Allowance</div>
-            <div className="text-lg font-bold text-green-900">{formatCurrency(dailyAllowance)}</div>
+          <div className={`${safeSpendColors.bg} p-3 rounded-lg`}>
+            <div className={`text-sm ${safeSpendColors.text}`}>Daily Safe to Spend • {getSafeSpendMessage()}</div>
+            <div className={`text-lg font-bold ${safeSpendColors.amount}`}>
+              {formatCurrency(Math.max(0, safeToSpendDaily))}
+            </div>
+            {daysRemaining !== 30 && (
+              <div className={`text-xs ${safeSpendColors.text} mt-1`}>
+                {daysRemaining} days left this month
+              </div>
+            )}
           </div>
         </div>
 
@@ -847,10 +1041,10 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
                 </div>
                 <div className="flex space-x-2">
                   <button 
-                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors"
-                    onClick={() => handleTrialAction(trial.id, 'review')}
+                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors"
+                    onClick={() => handleTrialAction(trial.id, 'start')}
                   >
-                    Review
+                    Start Subscription
                   </button>
                   <button 
                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-colors"
@@ -1068,7 +1262,36 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
 function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurrency }: any) {
   const budgetUsage = budgetProfile ? (totalSpend / budgetProfile.discretionary_budget) * 100 : 0
   const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
-  const dailyAllowance = remainingBudget / 30
+  
+  // Calculate safe to spend with enhanced logic
+  const today = new Date()
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+  const dayOfMonth = today.getDate()
+  const daysRemaining = daysInMonth - dayOfMonth + 1
+  
+  // Safe daily spend calculation
+  const safeToSpendDaily = remainingBudget / daysRemaining
+  
+  // Determine if overspending (comparing against original daily allowance)
+  const isOverspending = safeToSpendDaily < (remainingBudget / 30) * 0.8 // 20% buffer
+  const isUnderspending = safeToSpendDaily > (remainingBudget / 30) * 1.2 // 20% buffer
+  
+  // Color and message logic
+  const getSafeSpendColor = () => {
+    if (remainingBudget <= 0) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (isOverspending) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (isUnderspending) return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
+    return { bg: 'bg-yellow-50', text: 'text-yellow-800', amount: 'text-yellow-900' }
+  }
+  
+  const getSafeSpendMessage = () => {
+    if (remainingBudget <= 0) return "Budget Exceeded"
+    if (isOverspending) return "Reduce Spending"
+    if (isUnderspending) return "Safe to Spend"
+    return "On Track"
+  }
+  
+  const safeSpendColors = getSafeSpendColor()
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1105,13 +1328,13 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
             </div>
           </div>
 
-          <div className="bg-green-50 p-4 rounded-lg border-t-4 border-green-500">
-            <div className="text-sm text-green-600 font-medium">Remaining Budget</div>
+          <div className={`${safeSpendColors.bg} p-4 rounded-lg border-t-4 ${remainingBudget >= 0 ? 'border-green-500' : 'border-red-500'}`}>
+            <div className={`text-sm ${safeSpendColors.text} font-medium`}>Remaining Budget</div>
             <div className={`text-2xl font-bold ${remainingBudget >= 0 ? 'text-green-900' : 'text-red-900'}`}>
               {formatCurrency(remainingBudget)}
             </div>
-            <div className="text-sm text-green-600 mt-1">
-              {formatCurrency(dailyAllowance)} per day
+            <div className={`text-sm ${safeSpendColors.text} mt-1`}>
+              {formatCurrency(Math.max(0, safeToSpendDaily))} safe per day • {getSafeSpendMessage()}
             </div>
           </div>
         </div>
@@ -1167,12 +1390,12 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
           })}
         </div>
 
-        {/* Daily Allowance Breakdown */}
-        <div className="mt-8 bg-gray-50 p-4 rounded-lg">
-          <h4 className="text-md font-medium text-gray-900 mb-3">Daily Allowance</h4>
-          <div className="text-2xl font-bold text-gray-900">{formatCurrency(dailyAllowance)}</div>
-          <div className="text-sm text-gray-600 mt-1">
-            Available for daily discretionary spending
+        {/* Daily Safe Spending Breakdown */}
+        <div className={`mt-8 ${safeSpendColors.bg} p-4 rounded-lg`}>
+          <h4 className={`text-md font-medium ${safeSpendColors.text} mb-3`}>Daily Safe to Spend • {getSafeSpendMessage()}</h4>
+          <div className={`text-2xl font-bold ${safeSpendColors.amount}`}>{formatCurrency(Math.max(0, safeToSpendDaily))}</div>
+          <div className={`text-sm ${safeSpendColors.text} mt-1`}>
+            Available for daily discretionary spending ({daysRemaining} days left)
           </div>
         </div>
       </div>
@@ -1616,6 +1839,148 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
             </div>
           </form>
         </div>
+      </div>
+    </div>
+  )
+}
+
+const TrialConversionModal = ({ 
+  isOpen, 
+  onClose, 
+  trial, 
+  onConvert 
+}: { 
+  isOpen: boolean
+  onClose: () => void
+  trial: any
+  onConvert: (subscriptionData: any) => void
+}) => {
+  const [formData, setFormData] = useState({
+    name: trial?.name || '',
+    price: trial?.price || '',
+    billingCycle: trial?.billingCycle || '',
+    nextPayment: trial?.nextPayment || '',
+    category: trial?.category || '',
+    status: 'active' as const
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onConvert({
+      ...formData,
+      id: Date.now() // Generate new ID for active subscription
+    })
+    onClose()
+  }
+
+  const handleCancel = () => {
+    const cancelUrl = trial?.cancellationUrl || trial?.supportEmail || 'mailto:support@company.com'
+    window.open(cancelUrl, '_blank')
+    onClose()
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-semibold mb-4">Convert Trial to Subscription</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Service Name
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Price
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={formData.price}
+              onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Billing Cycle
+            </label>
+            <select
+              value={formData.billingCycle}
+              onChange={(e) => setFormData(prev => ({ ...prev, billingCycle: e.target.value }))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="">Select billing cycle</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+              <option value="quarterly">Quarterly</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Next Payment Date
+            </label>
+            <input
+              type="date"
+              value={formData.nextPayment}
+              onChange={(e) => setFormData(prev => ({ ...prev, nextPayment: e.target.value }))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
+            <select
+              value={formData.category}
+              onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="">Select category</option>
+              <option value="Entertainment">Entertainment</option>
+              <option value="Productivity">Productivity</option>
+              <option value="Fitness">Fitness</option>
+              <option value="Education">Education</option>
+              <option value="Music">Music</option>
+              <option value="News">News</option>
+              <option value="Business">Business</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              Add Subscription
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="flex-1 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+            >
+              Cancel Trial
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
