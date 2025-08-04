@@ -6,14 +6,67 @@ export default function Settings() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [exportLoading, setExportLoading] = useState(false)
+  const [gmailSyncEnabled, setGmailSyncEnabled] = useState(false)
 
   useEffect(() => {
     checkUser()
+    loadGmailSyncStatus()
   }, [])
 
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     setUser(user)
+  }
+
+  const loadGmailSyncStatus = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('gmail_sync_enabled')
+          .eq('id', user.id)
+          .single()
+        
+        setGmailSyncEnabled(data?.gmail_sync_enabled || false)
+      }
+    } catch (error) {
+      console.error('Error loading Gmail sync status:', error)
+    }
+  }
+
+  const toggleGmailSync = async () => {
+    if (!user) return
+    
+    setLoading(true)
+    try {
+      const newStatus = !gmailSyncEnabled
+      
+      // Update user metadata in Supabase
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ 
+          id: user.id, 
+          gmail_sync_enabled: newStatus,
+          updated_at: new Date().toISOString()
+        })
+
+      if (error) throw error
+
+      setGmailSyncEnabled(newStatus)
+      
+      // Show confirmation message
+      if (newStatus) {
+        alert('Gmail sync enabled! Your subscriptions will be automatically detected from Gmail.')
+      } else {
+        alert('Gmail sync disabled. Automatic subscription detection turned off.')
+      }
+    } catch (error) {
+      console.error('Error toggling Gmail sync:', error)
+      alert('Failed to update Gmail sync setting. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleExport = async () => {
@@ -24,29 +77,36 @@ export default function Settings() {
         .from('subscriptions')
         .select('*')
 
-      const { data: budget } = await supabase
-        .from('budget_profiles')
-        .select('*')
-        .single()
-
-      // Create export data
-      const exportData = {
-        user: {
-          email: user?.email,
-          id: user?.id
-        },
-        subscriptions: subscriptions || [],
-        budget: budget || null,
-        exportDate: new Date().toISOString()
+      if (!subscriptions || subscriptions.length === 0) {
+        alert('No subscriptions found to export.')
+        return
       }
 
-      // Create and download JSON file
-      const dataStr = JSON.stringify(exportData, null, 2)
-      const dataBlob = new Blob([dataStr], { type: 'application/json' })
+      // Create CSV content
+      const headers = ['Name', 'Cost', 'Currency', 'Billing Cycle', 'Next Payment', 'Category', 'Status', 'Description']
+      const csvRows = [headers.join(',')]
+
+      subscriptions.forEach(sub => {
+        const row = [
+          `"${sub.name || ''}"`,
+          sub.cost || 0,
+          `"${sub.currency || 'USD'}"`,
+          `"${sub.billing_cycle || ''}"`,
+          `"${sub.next_payment_date || ''}"`,
+          `"${sub.category || ''}"`,
+          `"${sub.status || 'active'}"`,
+          `"${sub.description || ''}"`
+        ]
+        csvRows.push(row.join(','))
+      })
+
+      // Create and download CSV file
+      const csvContent = csvRows.join('\n')
+      const dataBlob = new Blob([csvContent], { type: 'text/csv' })
       const url = URL.createObjectURL(dataBlob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `subtracker-export-${new Date().toISOString().split('T')[0]}.json`
+      link.download = `subtracker-subscriptions-${new Date().toISOString().split('T')[0]}.csv`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -76,16 +136,54 @@ export default function Settings() {
       return
     }
 
+    const secondConfirm = prompt('Type "DELETE" to confirm account deletion:')
+    if (secondConfirm !== 'DELETE') {
+      alert('Account deletion cancelled.')
+      return
+    }
+
     setLoading(true)
     try {
-      // Delete user data
-      await supabase.from('subscriptions').delete().eq('user_id', user?.id)
-      await supabase.from('budget_profiles').delete().eq('user_id', user?.id)
+      if (!user?.id) {
+        throw new Error('No user ID found')
+      }
+
+      // Delete user data in order (due to foreign key constraints)
+      const { error: subscriptionsError } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('user_id', user.id)
       
-      // Sign out
+      if (subscriptionsError) throw subscriptionsError
+
+      const { error: budgetError } = await supabase
+        .from('budget_profiles')
+        .delete()
+        .eq('user_id', user.id)
+      
+      if (budgetError) throw budgetError
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', user.id)
+      
+      if (profileError) throw profileError
+
+      // Delete the user account from Supabase Auth
+      const { error: authError } = await supabase.auth.admin.deleteUser(user.id)
+      if (authError) {
+        console.warn('Could not delete auth user (admin access required):', authError)
+      }
+      
+      // Sign out the user
       await supabase.auth.signOut()
+      
+      alert('Your account has been successfully deleted.')
+      window.location.href = '/'
     } catch (error) {
       console.error('Account deletion failed:', error)
+      alert('Failed to delete account. Please contact support if this issue persists.')
     } finally {
       setLoading(false)
     }
@@ -150,12 +248,41 @@ export default function Settings() {
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-lg font-medium text-gray-900">Gmail Integration</h2>
             </div>
-            <div className="p-6">
+            <div className="p-6 space-y-6">
+              {/* Gmail Sync Toggle */}
               <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900">Automatic Gmail Sync</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Automatically detect and track subscriptions from your Gmail emails
+                  </p>
+                </div>
+                <div className="flex items-center">
+                  <button
+                    onClick={toggleGmailSync}
+                    disabled={loading}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 ${
+                      gmailSyncEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform ring-0 transition duration-200 ease-in-out ${
+                        gmailSyncEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <span className="ml-3 text-sm text-gray-900">
+                    {gmailSyncEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Gmail Connection Status */}
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                 <div>
                   <h3 className="text-sm font-medium text-gray-900">Gmail Connection</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Manage your Gmail integration for automatic subscription detection
+                    Manage your Gmail account connection for subscription detection
                   </p>
                 </div>
                 <button
@@ -177,9 +304,9 @@ export default function Settings() {
             <div className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-gray-900">Export Your Data</h3>
+                  <h3 className="text-sm font-medium text-gray-900">Export Subscriptions as CSV</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Download all your subscription and budget data as a JSON file
+                    Download all your subscription data in CSV format for easy import into other applications
                   </p>
                 </div>
                 <button
@@ -187,7 +314,7 @@ export default function Settings() {
                   disabled={exportLoading}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium disabled:opacity-50"
                 >
-                  {exportLoading ? 'Exporting...' : 'Export'}
+                  {exportLoading ? 'Exporting...' : 'Export CSV'}
                 </button>
               </div>
             </div>
