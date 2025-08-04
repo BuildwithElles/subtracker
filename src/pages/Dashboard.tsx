@@ -414,7 +414,6 @@ export default function Dashboard() {
     const totalSpend = calculateTotalSpend()
     const activeSubscriptions = subscriptions.length
     const trialsEndingCount = getTrialsEnding().length
-    const upcomingChargesCount = getUpcomingCharges().length
     const budgetUsagePercent = getBudgetUsage()
     
     // Get current time for time-based greeting
