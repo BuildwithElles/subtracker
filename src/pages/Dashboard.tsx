@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
+import { alertSystem, TrialAlert, BudgetAlert } from '../lib/alertSystem'
+import { weeklyDigestSystem, WeeklyDigest } from '../lib/weeklyDigest'
+import { budgetAnalytics, BudgetInsights } from '../lib/budgetAnalytics'
 
 interface Subscription {
   id: string
@@ -18,7 +21,10 @@ interface Subscription {
 interface BudgetProfile {
   id?: string
   user_id: string
-  monthly_budget: number
+  monthly_income: number
+  fixed_costs: number
+  savings_target: number
+  discretionary_budget: number
   currency: string
   spending_limit_alerts: boolean
 }
@@ -50,20 +56,8 @@ const EXCHANGE_RATES: ExchangeRates = {
   'INR_GBP': 0.0095,
 }
 
-// Dummy data for initial design
-const dummySubscriptions: Subscription[] = [
-  { id: '1', service_name: 'Netflix', amount: 15.99, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-05', status: 'active', category: 'Entertainment' },
-  { id: '2', service_name: 'Spotify Premium', amount: 9.99, currency: 'EUR', frequency: 'monthly', next_charge_date: '2025-08-08', status: 'active', category: 'Music' },
-  { id: '3', service_name: 'Adobe Creative Cloud', amount: 52.99, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-20', status: 'active', category: 'Productivity' },
-  { id: '4', service_name: 'Notion Pro', amount: 6.50, currency: 'GBP', frequency: 'monthly', next_charge_date: '2025-08-05', status: 'trial', category: 'Productivity', trial_end_date: '2025-08-05' },
-  { id: '5', service_name: 'AWS', amount: 1950.00, currency: 'INR', frequency: 'monthly', next_charge_date: '2025-12-08', status: 'active', category: 'Development' },
-  { id: '6', service_name: 'Figma Pro', amount: 12.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-06', status: 'trial', category: 'Design', trial_end_date: '2025-08-06' },
-  { id: '7', service_name: 'ChatGPT Plus', amount: 20.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-07', status: 'trial', category: 'AI Tools', trial_end_date: '2025-08-07' },
-  { id: '8', service_name: 'GitHub Copilot', amount: 10.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-10', status: 'trial', category: 'Development', trial_end_date: '2025-08-10' }
-]
-
 export default function Dashboard() {
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(dummySubscriptions)
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -78,20 +72,37 @@ export default function Dashboard() {
   const [showTrialConversionModal, setShowTrialConversionModal] = useState(false)
   const [convertingTrial, setConvertingTrial] = useState<Subscription | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [pendingAlerts, setPendingAlerts] = useState<{
+    trialAlerts: TrialAlert[]
+    budgetAlerts: BudgetAlert[]
+  }>({ trialAlerts: [], budgetAlerts: [] })
+  const [showAlertBanner, setShowAlertBanner] = useState(false)
+  const [_budgetInsights, setBudgetInsights] = useState<BudgetInsights | null>(null)
+  const [weeklyDigestSummary, setWeeklyDigestSummary] = useState<{
+    hasUnviewedDigest: boolean
+    latestDigest: WeeklyDigest | null
+    weeklyTrend: 'up' | 'down' | 'stable'
+  } | null>(null)
 
   useEffect(() => {
     checkUser()
     loadUserPreferences()
     loadBudgetProfile()
-    // fetchDashboardData() // Will implement later
+    loadSubscriptions()
+    initializeAlertSystem()
 
     // Reload budget data when window gains focus (user returns from budget page)
     const handleFocus = () => {
       loadBudgetProfile()
+      loadSubscriptions()
+      loadPendingAlerts()
     }
 
     window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      alertSystem.stopAlertMonitoring()
+    }
   }, [])
 
   const checkUser = async () => {
@@ -144,6 +155,110 @@ export default function Dashboard() {
     }
   }
 
+  const loadSubscriptions = async () => {
+    try {
+      const { data: user } = await supabase.auth.getUser()
+      if (!user.user) return
+
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', user.user.id)
+
+      if (error) {
+        console.error('Error loading subscriptions:', error)
+        alert('Failed to load subscriptions')
+        return
+      }
+
+      const formattedSubscriptions = data.map(sub => ({
+        id: sub.id,
+        service_name: sub.service_name,
+        amount: sub.amount,
+        currency: sub.currency || 'USD',
+        frequency: sub.frequency,
+        next_charge_date: sub.next_billing,
+        status: sub.status,
+        category: sub.category || 'Other',
+        created_at: sub.created_at
+      }))
+
+      setSubscriptions(formattedSubscriptions)
+    } catch (error) {
+      console.error('Error in loadSubscriptions:', error)
+      alert('Failed to load subscriptions')
+    }
+  }
+
+  const initializeAlertSystem = async () => {
+    // Request notification permission
+    await alertSystem.requestNotificationPermission()
+    
+    // Initialize alert monitoring
+    alertSystem.initialize()
+    
+    // Initialize weekly digest system
+    weeklyDigestSystem.initialize()
+    
+    // Load pending alerts
+    await loadPendingAlerts()
+    
+    // Load budget insights
+    await loadBudgetInsights()
+    
+    // Load weekly digest summary
+    await loadWeeklyDigestSummary()
+  }
+
+  const loadPendingAlerts = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const alerts = await alertSystem.getPendingAlerts(user.id)
+      setPendingAlerts(alerts)
+      
+      // Show alert banner if there are pending alerts
+      const totalAlerts = alerts.trialAlerts.length + alerts.budgetAlerts.length
+      setShowAlertBanner(totalAlerts > 0)
+    } catch (error) {
+      console.error('Error loading pending alerts:', error)
+    }
+  }
+
+  const acknowledgeAlert = async (alertId: string, type: 'trial' | 'budget') => {
+    try {
+      await alertSystem.acknowledgeAlert(alertId, type)
+      await loadPendingAlerts() // Refresh alerts
+    } catch (error) {
+      console.error('Error acknowledging alert:', error)
+    }
+  }
+
+  const loadBudgetInsights = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const insights = await budgetAnalytics.calculateBudgetInsights(user.id)
+      setBudgetInsights(insights)
+    } catch (error) {
+      console.error('Error loading budget insights:', error)
+    }
+  }
+
+  const loadWeeklyDigestSummary = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const summary = await weeklyDigestSystem.getDigestSummary(user.id)
+      setWeeklyDigestSummary(summary)
+    } catch (error) {
+      console.error('Error loading weekly digest summary:', error)
+    }
+  }
+
   const convertCurrency = (amount: number, fromCurrency: string, toCurrency: string): number => {
     if (fromCurrency === toCurrency) return amount
     
@@ -176,23 +291,47 @@ export default function Dashboard() {
 
   const handleGmailConnect = async () => {
     // In a real implementation, this would trigger Google OAuth
-    // For now, we'll simulate the connection
-    setShowGmailModal(false)
-    setIsScanning(true)
-    
     try {
-      // Simulate Gmail scanning
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions('mock-access-token')
+      // For now, we'll simulate the OAuth flow
+      // In production, you would:
+      // 1. Redirect to Google OAuth
+      // 2. Get authorization code
+      // 3. Exchange for access token
+      // 4. Store token securely
       
-      console.log('Parsed trials from Gmail:', parsedTrials)
+      const mockAccessToken = 'mock-gmail-access-token-' + Date.now()
       
+      // Store the access token in the user's profile
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            gmail_access_token: mockAccessToken,
+            updated_at: new Date().toISOString()
+          })
+
+        if (profileError) {
+          console.error('Error storing Gmail token:', profileError)
+          alert('Failed to store Gmail access token')
+          return
+        }
+
+        // Update user metadata
         await supabase.auth.updateUser({
           data: { gmail_connected: true }
         })
         setUserMetadata(prev => ({ ...prev, gmail_connected: true }))
       }
+      
+      setShowGmailModal(false)
+      setIsScanning(true)
+      
+      // Simulate Gmail scanning with the stored token
+      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions(mockAccessToken)
+      
+      console.log('Parsed trials from Gmail:', parsedTrials)
       
       // Show success message with found trials
       const foundTrials = parsedTrials.length
@@ -200,7 +339,7 @@ export default function Dashboard() {
       
     } catch (error) {
       console.error('Gmail connection error:', error)
-      alert('Error connecting to Gmail. Please try again.')
+      alert('Failed to connect Gmail')
     } finally {
       setIsScanning(false)
     }
@@ -272,15 +411,26 @@ export default function Dashboard() {
   // Subscription Management Functions
   const handleAddSubscription = async (subscriptionData: Omit<Subscription, 'id'>) => {
     try {
-      const newSubscription: Subscription = {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        alert('You must be logged in to add subscriptions')
+        return
+      }
+
+      const newSubscription = {
         ...subscriptionData,
-        id: `new-${Date.now()}` // Generate temporary ID, in real app use Supabase auto-generated ID
+        user_id: user.id
       }
       
-      // In real implementation, save to Supabase
-      // const { data, error } = await supabase.from('subscriptions').insert(newSubscription)
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .insert(newSubscription)
+        .select()
+        .single()
       
-      setSubscriptions(prev => [...prev, newSubscription])
+      if (error) throw error
+      
+      setSubscriptions(prev => [...prev, data])
       setShowAddModal(false)
       alert('Subscription added successfully!')
     } catch (error) {
@@ -291,8 +441,21 @@ export default function Dashboard() {
 
   const handleEditSubscription = async (subscriptionData: Subscription) => {
     try {
-      // In real implementation, update in Supabase
-      // const { error } = await supabase.from('subscriptions').update(subscriptionData).eq('id', subscriptionData.id)
+      const { error } = await supabase
+        .from('subscriptions')
+        .update({
+          service_name: subscriptionData.service_name,
+          amount: subscriptionData.amount,
+          currency: subscriptionData.currency,
+          frequency: subscriptionData.frequency,
+          next_charge_date: subscriptionData.next_charge_date,
+          category: subscriptionData.category,
+          status: subscriptionData.status,
+          trial_end_date: subscriptionData.trial_end_date
+        })
+        .eq('id', subscriptionData.id)
+      
+      if (error) throw error
       
       setSubscriptions(prev => 
         prev.map(sub => sub.id === subscriptionData.id ? subscriptionData : sub)
@@ -310,6 +473,13 @@ export default function Dashboard() {
     if (!confirm('Are you sure you want to cancel this subscription?')) return
     
     try {
+      const { error } = await supabase
+        .from('subscriptions')
+        .update({ status: 'cancelled' })
+        .eq('id', subscriptionId)
+      
+      if (error) throw error
+      
       setSubscriptions(prev => 
         prev.map(sub => 
           sub.id === subscriptionId ? { ...sub, status: 'cancelled' } : sub
@@ -335,8 +505,12 @@ export default function Dashboard() {
     if (!confirm('Are you sure you want to delete this subscription? This action cannot be undone.')) return
     
     try {
-      // In real implementation, delete from Supabase
-      // const { error } = await supabase.from('subscriptions').delete().eq('id', subscriptionId)
+      const { error } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('id', subscriptionId)
+      
+      if (error) throw error
       
       setSubscriptions(prev => prev.filter(sub => sub.id !== subscriptionId))
       alert('Subscription deleted successfully!')
@@ -383,7 +557,7 @@ export default function Dashboard() {
   const getBudgetUsage = () => {
     if (!budgetProfile) return 0
     const totalSpend = calculateTotalSpend()
-    return Math.min((totalSpend / budgetProfile.monthly_budget) * 100, 100)
+    return Math.min((totalSpend / budgetProfile.discretionary_budget) * 100, 100)
   }
 
   const getSpendingByCategory = () => {
@@ -586,6 +760,107 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Weekly Digest Banner */}
+        {weeklyDigestSummary?.hasUnviewedDigest && weeklyDigestSummary.latestDigest && (
+          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 002 2h2a2 2 0 012-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 00-2 2h-2a2 2 0 00-2 2v6a2 2 0 01-2 2H9z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-blue-800">
+                    📊 Your Weekly Digest is Ready!
+                  </h3>
+                  <p className="text-xs text-blue-700 mt-1">
+                    Week of {new Date(weeklyDigestSummary.latestDigest.week_start).toLocaleDateString()} - 
+                    {formatCurrency(weeklyDigestSummary.latestDigest.total_charges)} spent, 
+                    {weeklyDigestSummary.latestDigest.new_subscriptions} new subscription{weeklyDigestSummary.latestDigest.new_subscriptions !== 1 ? 's' : ''}
+                    {weeklyDigestSummary.weeklyTrend === 'up' && ' 📈 Spending increased'}
+                    {weeklyDigestSummary.weeklyTrend === 'down' && ' 📉 Spending decreased'}
+                  </p>
+                  {weeklyDigestSummary.latestDigest.recommendations.length > 0 && (
+                    <p className="text-xs text-blue-600 mt-1 font-medium">
+                      💡 {weeklyDigestSummary.latestDigest.recommendations[0]}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (weeklyDigestSummary.latestDigest) {
+                    await weeklyDigestSystem.markDigestAsViewed(weeklyDigestSummary.latestDigest.id)
+                    await loadWeeklyDigestSummary()
+                  }
+                }}
+                className="flex-shrink-0 ml-4 bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-blue-700"
+              >
+                View Details
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Alert Banner */}
+        {showAlertBanner && (pendingAlerts.trialAlerts.length > 0 || pendingAlerts.budgetAlerts.length > 0) && (
+          <div className="mb-6 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg p-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="flex-shrink-0">
+                  <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6l2 2H9V7z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v6h6" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-orange-800">
+                    You have {pendingAlerts.trialAlerts.length + pendingAlerts.budgetAlerts.length} pending alerts
+                  </h3>
+                  <div className="mt-2 space-y-1">
+                    {pendingAlerts.trialAlerts.slice(0, 2).map((alert) => (
+                      <div key={alert.id} className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1">
+                        <span>
+                          {alert.alert_type === 'expired' ? '🚨' : '⚠️'} {alert.service_name} trial {alert.alert_type === 'expired' ? 'has expired' : `ends in ${alert.alert_type.replace('-day', ' day(s)')}`}
+                        </span>
+                        <button
+                          onClick={() => acknowledgeAlert(alert.id, 'trial')}
+                          className="ml-2 text-orange-600 hover:text-orange-800"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {pendingAlerts.budgetAlerts.slice(0, 2).map((alert) => (
+                      <div key={alert.id} className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1">
+                        <span>
+                          {alert.alert_type === 'exceeded_limit' ? '🚨' : '⚠️'} Budget {alert.alert_type.replace('_', ' ')}: {Math.round(alert.percentage_used)}% used
+                        </span>
+                        <button
+                          onClick={() => acknowledgeAlert(alert.id, 'budget')}
+                          className="ml-2 text-orange-600 hover:text-orange-800"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAlertBanner(false)}
+                className="flex-shrink-0 ml-4 text-orange-400 hover:text-orange-600"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Welcome Back Section */}
         {(() => {
           const welcomeData = generateWelcomeMessage()
@@ -696,7 +971,7 @@ export default function Dashboard() {
                     style={{ width: `${budgetUsage}%` }}
                   ></div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile.monthly_budget)} limit</p>
+                <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile.discretionary_budget)} limit</p>
               </>
             ) : (
               <>
@@ -1352,7 +1627,7 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
             <span>{Math.round(budgetUsage)}% of recommended limit</span>
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {formatCurrency(budgetProfile?.monthly_budget || 0)} limit
+            {formatCurrency(budgetProfile?.discretionary_budget || 0)} limit
           </div>
         </div>
       </div>

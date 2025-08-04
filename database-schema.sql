@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   gmail_sync_enabled BOOLEAN DEFAULT false,
+  gmail_access_token TEXT,
   preferred_currency TEXT DEFAULT 'USD',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -25,11 +26,11 @@ CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (
 CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL,
-  cost DECIMAL(10,2) NOT NULL,
+  service_name TEXT NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
   currency TEXT DEFAULT 'USD',
-  billing_cycle TEXT NOT NULL, -- 'monthly', 'yearly', 'weekly', etc.
-  next_payment_date DATE,
+  frequency TEXT NOT NULL, -- 'monthly', 'yearly', 'weekly', etc.
+  next_charge_date DATE,
   category TEXT,
   status TEXT DEFAULT 'active', -- 'active', 'trial', 'cancelled', 'paused'
   trial_end_date DATE,
@@ -52,7 +53,10 @@ CREATE POLICY "Users can delete own subscriptions" ON subscriptions FOR DELETE U
 CREATE TABLE IF NOT EXISTS budget_profiles (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-  monthly_budget DECIMAL(10,2),
+  monthly_income DECIMAL(10,2),
+  fixed_costs DECIMAL(10,2),
+  savings_target DECIMAL(10,2),
+  discretionary_budget DECIMAL(10,2),
   currency TEXT DEFAULT 'USD',
   spending_limit_alerts BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -102,3 +106,109 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_trial_end ON subscriptions(trial_end_date);
 CREATE INDEX IF NOT EXISTS idx_budget_profiles_user_id ON budget_profiles(user_id);
+
+-- Add alert tables for trial and budget notifications
+CREATE TABLE trial_alerts (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    subscription_id UUID REFERENCES subscriptions(id) ON DELETE CASCADE,
+    service_name TEXT NOT NULL,
+    trial_end_date DATE NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    alert_type TEXT NOT NULL CHECK (alert_type IN ('7-day', '3-day', '1-day', 'expired')),
+    sent_at TIMESTAMP WITH TIME ZONE,
+    acknowledged BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE budget_alerts (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    alert_type TEXT NOT NULL CHECK (alert_type IN ('approaching_limit', 'exceeded_limit', 'weekly_summary')),
+    current_spending DECIMAL(10,2) NOT NULL,
+    budget_limit DECIMAL(10,2) NOT NULL,
+    percentage_used DECIMAL(5,2) NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE,
+    acknowledged BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for better query performance
+CREATE INDEX idx_trial_alerts_user_id ON trial_alerts(user_id);
+CREATE INDEX idx_trial_alerts_subscription_id ON trial_alerts(subscription_id);
+CREATE INDEX idx_trial_alerts_acknowledged ON trial_alerts(acknowledged);
+CREATE INDEX idx_budget_alerts_user_id ON budget_alerts(user_id);
+CREATE INDEX idx_budget_alerts_acknowledged ON budget_alerts(acknowledged);
+
+-- RLS policies for trial_alerts
+ALTER TABLE trial_alerts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own trial alerts" ON trial_alerts
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own trial alerts" ON trial_alerts
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own trial alerts" ON trial_alerts
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own trial alerts" ON trial_alerts
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- RLS policies for budget_alerts
+ALTER TABLE budget_alerts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own budget alerts" ON budget_alerts
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own budget alerts" ON budget_alerts
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own budget alerts" ON budget_alerts
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own budget alerts" ON budget_alerts
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- Add weekly digest table
+CREATE TABLE weekly_digests (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    week_start DATE NOT NULL,
+    week_end DATE NOT NULL,
+    total_charges DECIMAL(10,2) NOT NULL DEFAULT 0,
+    new_subscriptions INTEGER NOT NULL DEFAULT 0,
+    cancelled_subscriptions INTEGER NOT NULL DEFAULT 0,
+    trial_conversions INTEGER NOT NULL DEFAULT 0,
+    budget_usage_percentage DECIMAL(5,2) NOT NULL DEFAULT 0,
+    top_categories JSONB DEFAULT '[]',
+    upcoming_trials_ending INTEGER NOT NULL DEFAULT 0,
+    upcoming_charges INTEGER NOT NULL DEFAULT 0,
+    recommendations JSONB DEFAULT '[]',
+    generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    sent_at TIMESTAMP WITH TIME ZONE,
+    viewed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for weekly digests
+CREATE INDEX idx_weekly_digests_user_id ON weekly_digests(user_id);
+CREATE INDEX idx_weekly_digests_week_start ON weekly_digests(week_start);
+CREATE INDEX idx_weekly_digests_viewed ON weekly_digests(viewed_at);
+CREATE UNIQUE INDEX idx_weekly_digests_user_week ON weekly_digests(user_id, week_start);
+
+-- RLS policies for weekly_digests
+ALTER TABLE weekly_digests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own weekly digests" ON weekly_digests
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own weekly digests" ON weekly_digests
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own weekly digests" ON weekly_digests
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own weekly digests" ON weekly_digests
+    FOR DELETE USING (auth.uid() = user_id);
