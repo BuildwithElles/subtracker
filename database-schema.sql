@@ -212,3 +212,25 @@ CREATE POLICY "Users can update their own weekly digests" ON weekly_digests
 
 CREATE POLICY "Users can delete their own weekly digests" ON weekly_digests
     FOR DELETE USING (auth.uid() = user_id);
+
+-- Referrals table for tracking referrer codes
+CREATE TABLE IF NOT EXISTS referrals (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  referrer_code TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable RLS on referrals
+ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
+
+-- Users can only see and manage their own referrals
+CREATE POLICY "Users can view own referrals" ON referrals FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own referrals" ON referrals FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own referrals" ON referrals FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own referrals" ON referrals FOR DELETE USING (auth.uid() = user_id);
+
+-- Index for faster referrer code lookups
+CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referrer_code);
+CREATE INDEX IF NOT EXISTS idx_referrals_user_id ON referrals(user_id);

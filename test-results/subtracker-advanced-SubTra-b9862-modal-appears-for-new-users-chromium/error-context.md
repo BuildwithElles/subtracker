@@ -1,0 +1,54 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - text: S
+  - heading "SubTracker" [level=1]
+  - button "Scan Gmail":
+    - img
+    - text: Scan Gmail
+  - combobox:
+    - option "USD ($)" [selected]
+    - option "EUR (€)"
+    - option "GBP (£)"
+    - option "INR (₹)"
+  - img
+  - link "Settings":
+    - /url: /settings
+    - img
+    - text: Settings
+  - button "Logout":
+    - img
+    - text: Logout
+- main:
+  - heading "Good evening, Demo User! 👋" [level=2]
+  - paragraph: Ready to take control of your subscriptions? Start by adding your current services.
+  - text: 0 Active • $0.00 Monthly
+  - img
+  - heading "Monthly Spend" [level=3]
+  - img
+  - text: $0.00
+  - paragraph: 0 active subscriptions
+  - heading "Budget Usage" [level=3]
+  - img
+  - text: "--"
+  - link "Set up your budget to track usage":
+    - /url: /budget
+  - heading "Trials Ending" [level=3]
+  - img
+  - text: "0"
+  - paragraph: Next 7 days
+  - heading "Upcoming Charges" [level=3]
+  - img
+  - text: "0"
+  - paragraph: Next 7 days
+  - navigation "Tabs":
+    - button "Overview"
+    - button "Subscriptions"
+    - button "Budget"
+    - button "Upcoming"
+  - heading "Budget Overview" [level=3]
+  - text: Monthly Income $0.00 Fixed Expenses -$0.00 Subscriptions -$0.00 Discretionary $0.00 Remaining Budget $0.00 Daily Safe to Spend • Budget Exceeded $0.00 28 days left this month
+  - heading "Spending by Category" [level=4]
+  - heading "Upcoming Charges" [level=4]
+```
