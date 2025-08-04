@@ -86,8 +86,14 @@ export default function Budget() {
     }
 
     try {
+      if (!user?.id) {
+        setError('You must be logged in to save budget data')
+        setLoading(false)
+        return
+      }
+
       const budgetData: BudgetProfile = {
-        user_id: user?.id || '',
+        user_id: user.id,
         monthly_budget: monthlyBudget,
         currency: 'USD',
         spending_limit_alerts: true
@@ -95,18 +101,24 @@ export default function Budget() {
 
       const { error } = await supabase
         .from('budget_profiles')
-        .upsert(budgetData)
+        .upsert(budgetData, {
+          onConflict: 'user_id'
+        })
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase error:', error)
+        throw error
+      }
 
       setSuccess(true)
       
-      // Show success message for 2 seconds, then navigate to dashboard
+      // Show success message for 1.5 seconds, then navigate to dashboard
       setTimeout(() => {
         navigate('/dashboard')
-      }, 2000)
+      }, 1500)
 
     } catch (error: any) {
+      console.error('Budget save error:', error)
       setError(error.message || 'Failed to save budget')
     } finally {
       setLoading(false)
@@ -163,8 +175,16 @@ export default function Budget() {
 
           {success && (
             <div className="mb-6 rounded-md bg-green-50 p-4">
-              <div className="text-sm text-green-700">
-                Budget saved successfully! 🎉 Redirecting to dashboard...
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-green-700">
+                  Budget saved successfully! 🎉 Redirecting to dashboard...
+                </div>
+                <Link
+                  to="/dashboard"
+                  className="px-3 py-1 text-xs font-medium text-green-600 bg-green-100 hover:bg-green-200 rounded-md border border-green-200 hover:border-green-300 transition-colors"
+                >
+                  Go to Dashboard Now
+                </Link>
               </div>
             </div>
           )}
