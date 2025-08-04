@@ -16,12 +16,11 @@ interface Subscription {
 }
 
 interface BudgetProfile {
-  id: string
-  monthly_income: number
-  fixed_expenses: number
-  savings_goal: number
-  discretionary_budget: number
-  currency: string // Add currency field
+  id?: string
+  user_id: string
+  monthly_budget: number
+  currency: string
+  spending_limit_alerts: boolean
 }
 
 interface ExchangeRates {
@@ -63,19 +62,10 @@ const dummySubscriptions: Subscription[] = [
   { id: '8', service_name: 'GitHub Copilot', amount: 10.00, currency: 'USD', frequency: 'monthly', next_charge_date: '2025-08-10', status: 'trial', category: 'Development', trial_end_date: '2025-08-10' }
 ]
 
-const dummyBudget: BudgetProfile = {
-  id: '1',
-  monthly_income: 4500,
-  fixed_expenses: 2200,
-  savings_goal: 500,
-  discretionary_budget: 1800,
-  currency: 'USD'
-}
-
 export default function Dashboard() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(dummySubscriptions)
-  const [budgetProfile] = useState<BudgetProfile | null>(dummyBudget)
-  const [loading] = useState(false)
+  const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
+  const [loading, setLoading] = useState(false)
   const [_user, _setUser] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>('USD')
@@ -90,7 +80,16 @@ export default function Dashboard() {
   useEffect(() => {
     checkUser()
     loadUserPreferences()
+    loadBudgetProfile()
     // fetchDashboardData() // Will implement later
+
+    // Reload budget data when window gains focus (user returns from budget page)
+    const handleFocus = () => {
+      loadBudgetProfile()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
   const checkUser = async () => {
@@ -115,6 +114,31 @@ export default function Dashboard() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user?.user_metadata?.preferred_currency) {
       setSelectedCurrency(user.user_metadata.preferred_currency)
+    }
+  }
+
+  const loadBudgetProfile = async () => {
+    try {
+      setLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (user) {
+        const { data, error } = await supabase
+          .from('budget_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error loading budget profile:', error)
+        } else if (data) {
+          setBudgetProfile(data)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load budget profile:', error)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -327,7 +351,7 @@ export default function Dashboard() {
   const getBudgetUsage = () => {
     if (!budgetProfile) return 0
     const totalSpend = calculateTotalSpend()
-    return Math.min((totalSpend / budgetProfile.discretionary_budget) * 100, 100)
+    return Math.min((totalSpend / budgetProfile.monthly_budget) * 100, 100)
   }
 
   const getSpendingByCategory = () => {
@@ -514,19 +538,39 @@ export default function Dashboard() {
           {/* Budget Usage */}
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-600">Budget Usage</h3>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-sm font-medium text-gray-600">Budget Usage</h3>
+                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <Link
+                to="/budget"
+                className="px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md border border-blue-200 hover:border-blue-300 transition-colors"
+              >
+                Set Your Budget
+              </Link>
             </div>
-            <div className="text-2xl font-bold text-gray-900">{Math.round(budgetUsage)}%</div>
-            <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-              <div 
-                className={`h-2 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                style={{ width: `${budgetUsage}%` }}
-              ></div>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile?.discretionary_budget || 0)} limit</p>
+            {budgetProfile ? (
+              <>
+                <div className="text-2xl font-bold text-gray-900">{Math.round(budgetUsage)}%</div>
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                  <div 
+                    className={`h-2 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                    style={{ width: `${budgetUsage}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile.monthly_budget)} limit</p>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-gray-400">--</div>
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                  <div className="h-2 rounded-full bg-gray-300" style={{ width: '0%' }}></div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Set up your budget to track usage</p>
+              </>
+            )}
           </div>
 
           {/* Trials Ending */}
@@ -1084,7 +1128,7 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
             <span>{Math.round(budgetUsage)}% of recommended limit</span>
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            {formatCurrency(budgetProfile?.discretionary_budget || 0)} limit
+            {formatCurrency(budgetProfile?.monthly_budget || 0)} limit
           </div>
         </div>
       </div>
