@@ -134,8 +134,8 @@ export default function SignUp() {
           }
         }
 
-        // Redirect to dashboard on success
-        navigate('/dashboard')
+        // Redirect to onboarding on success
+        navigate('/onboarding')
       }
     } catch (error: any) {
       setErrors({ general: 'An unexpected error occurred. Please try again.' })
@@ -152,7 +152,7 @@ export default function SignUp() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + '/dashboard',
+          redirectTo: window.location.origin + '/onboarding',
           queryParams: {
             access_type: 'offline',
             prompt: 'consent'
