@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: 'html',
   use: {
     // Use local development server for testing
-    baseURL: 'http://localhost:3002',
+    baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
     // Add screenshot on failure for better debugging
     screenshot: 'only-on-failure',

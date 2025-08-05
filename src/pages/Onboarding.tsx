@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
 
@@ -9,24 +9,86 @@ export default function Onboarding() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [isScanning, setIsScanning] = useState(false)
   const [foundSubscriptions, setFoundSubscriptions] = useState<ParsedTrialEmail[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [initializing, setInitializing] = useState(true)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   useEffect(() => {
     checkUser()
   }, [])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      navigate('/signup')
-      return
-    }
-    setCurrentUser(user)
+    try {
+      setInitializing(true)
+      setError(null)
+      
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        // Allow some time for auth to complete in case of redirect
+        setTimeout(() => {
+          navigate('/signup')
+        }, 2000)
+        return
+      }
 
-    // Check if user has already completed onboarding
-    if (user.user_metadata?.onboarding_completed) {
-      navigate('/dashboard')
-      return
+      setCurrentUser(user)
+
+      // Check if user has already completed onboarding
+      if (user.user_metadata?.onboarding_completed) {
+        navigate('/dashboard')
+        return
+      }
+
+      // Initialize step from URL or user metadata
+      const urlStep = searchParams.get('step')
+      const metadataStep = user.user_metadata?.onboarding_step
+      
+      if (urlStep && !isNaN(parseInt(urlStep))) {
+        const step = Math.min(Math.max(parseInt(urlStep), 1), 3)
+        setCurrentStep(step)
+      } else if (metadataStep && metadataStep > 1) {
+        setCurrentStep(metadataStep)
+      }
+
+      // Ensure user has a profile
+      await ensureUserProfile(user)
+      
+    } catch (err) {
+      console.error('Error checking user:', err)
+      setError('Failed to load user information. Please try refreshing the page.')
+    } finally {
+      setInitializing(false)
+    }
+  }
+
+  const ensureUserProfile = async (user: any) => {
+    try {
+      // Check if profile exists
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+
+      if (!existingProfile) {
+        // Create profile if it doesn't exist
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+            email: user.email,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+
+        if (profileError) {
+          console.error('Error creating user profile:', profileError)
+        }
+      }
+    } catch (err) {
+      console.error('Error ensuring user profile:', err)
     }
   }
 
@@ -49,7 +111,7 @@ export default function Onboarding() {
 
         if (profileError) {
           console.error('Error storing Gmail token:', profileError)
-          alert('Failed to store Gmail access token')
+          setError('Failed to store Gmail access token')
           setLoading(false)
           return
         }
@@ -74,7 +136,7 @@ export default function Onboarding() {
       
     } catch (error) {
       console.error('Gmail connection error:', error)
-      alert('Failed to connect Gmail')
+      setError('Failed to connect Gmail. Please try again.')
     } finally {
       setLoading(false)
       setIsScanning(false)
@@ -82,14 +144,19 @@ export default function Onboarding() {
   }
 
   const handleSkipGmail = async () => {
-    // Mark Gmail as skipped but continue onboarding
-    await supabase.auth.updateUser({
-      data: { 
-        gmail_connected: false,
-        onboarding_step: 2
-      }
-    })
-    setCurrentStep(2)
+    try {
+      // Mark Gmail as skipped but continue onboarding
+      await supabase.auth.updateUser({
+        data: { 
+          gmail_connected: false,
+          onboarding_step: 2
+        }
+      })
+      setCurrentStep(2)
+    } catch (error) {
+      console.error('Error skipping Gmail:', error)
+      setError('Failed to skip Gmail step. Please try again.')
+    }
   }
 
   const handleCompleteBudgetSetup = () => {
@@ -97,30 +164,51 @@ export default function Onboarding() {
   }
 
   const handleSkipBudget = async () => {
-    // Mark onboarding as completed
-    await supabase.auth.updateUser({
-      data: { 
-        onboarding_completed: true,
-        onboarding_step: 3
-      }
-    })
-    navigate('/dashboard')
+    try {
+      // Mark onboarding as completed
+      await supabase.auth.updateUser({
+        data: { 
+          onboarding_completed: true,
+          onboarding_step: 3
+        }
+      })
+      navigate('/dashboard')
+    } catch (error) {
+      console.error('Error skipping budget:', error)
+      setError('Failed to skip budget step. Please try again.')
+    }
   }
 
   const handleCompleteOnboarding = async () => {
-    // Mark onboarding as completed
-    await supabase.auth.updateUser({
-      data: { 
-        onboarding_completed: true,
-        onboarding_step: 3
-      }
-    })
-    navigate('/dashboard')
+    try {
+      // Mark onboarding as completed
+      await supabase.auth.updateUser({
+        data: { 
+          onboarding_completed: true,
+          onboarding_step: 3
+        }
+      })
+      navigate('/dashboard')
+    } catch (error) {
+      console.error('Error completing onboarding:', error)
+      setError('Failed to complete onboarding. Please try again.')
+    }
   }
 
   // Generate user name from email
   const userName = currentUser?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'there'
   const displayName = currentUser ? userName.charAt(0).toUpperCase() + userName.slice(1) : 'there'
+
+  if (initializing) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Setting up your onboarding experience...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!currentUser) {
     return (
@@ -149,19 +237,19 @@ export default function Onboarding() {
               <div className="flex items-center space-x-2 text-sm text-gray-500">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                   currentStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`}>
+                }`} data-testid="step-1">
                   1
                 </div>
                 <div className={`w-8 h-0.5 ${currentStep >= 2 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                   currentStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`}>
+                }`} data-testid="step-2">
                   2
                 </div>
                 <div className={`w-8 h-0.5 ${currentStep >= 3 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                   currentStep >= 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`}>
+                }`} data-testid="step-3">
                   3
                 </div>
               </div>
@@ -169,6 +257,38 @@ export default function Onboarding() {
           </div>
         </div>
       </header>
+
+      {/* Error Message */}
+      {error && (
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="bg-red-50 border border-red-200 rounded-md p-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+              <div className="ml-auto pl-3">
+                <div className="-mx-1.5 -my-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setError(null)}
+                    className="inline-flex bg-red-50 rounded-md p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-red-50 focus:ring-red-600"
+                  >
+                    <span className="sr-only">Dismiss</span>
+                    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Step 1: Gmail Integration */}
@@ -265,6 +385,20 @@ export default function Onboarding() {
                   Your privacy is protected and you can disconnect at any time.
                 </p>
               </div>
+
+              {/* Navigation */}
+              <div className="flex justify-between items-center mt-8 pt-6 border-t">
+                <div></div>
+                <button
+                  onClick={() => setCurrentStep(2)}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  Next
+                  <svg className="ml-2 -mr-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -341,6 +475,28 @@ export default function Onboarding() {
                   💡 Users with budgets save an average of 23% on their monthly subscription costs
                 </p>
               </div>
+
+              {/* Navigation */}
+              <div className="flex justify-between items-center mt-8 pt-6 border-t">
+                <button
+                  onClick={() => setCurrentStep(1)}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <svg className="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back
+                </button>
+                <button
+                  onClick={() => setCurrentStep(3)}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  Next
+                  <svg className="ml-2 -mr-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -411,6 +567,20 @@ export default function Onboarding() {
               >
                 Go to Dashboard
               </button>
+
+              {/* Navigation */}
+              <div className="flex justify-between items-center mt-8 pt-6 border-t">
+                <button
+                  onClick={() => setCurrentStep(2)}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <svg className="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back
+                </button>
+                <div></div>
+              </div>
             </div>
           </div>
         )}
