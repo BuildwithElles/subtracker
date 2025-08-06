@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [ main, develop ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 env:
   NODE_VERSION: '18'
@@ -15,26 +15,26 @@ jobs:
   lint-and-format:
     name: 🔍 Code Quality
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 📥 Install dependencies
         run: npm ci
-
+        
       - name: 🔍 ESLint check
         run: npm run lint
-
+        
       - name: 💅 Prettier format check
         run: npm run format:check
-
+        
       - name: 📊 TypeScript check
         run: npx tsc --noEmit
 
@@ -43,20 +43,20 @@ jobs:
     name: 🧪 Run Tests
     runs-on: ubuntu-latest
     needs: lint-and-format
-
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 📥 Install dependencies
         run: npm ci
-
+        
       # TODO: Add unit tests when implemented
       - name: 🧪 Run unit tests
         run: echo "Unit tests not yet implemented - skipping for now"
@@ -67,75 +67,174 @@ jobs:
     name: 🎭 E2E Tests
     runs-on: ubuntu-latest
     needs: lint-and-format
-
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 📥 Install dependencies
         run: npm ci
-
+        
       - name: 📥 Install Playwright browsers
         run: npx playwright install --with-deps
-
+        
       - name: 🏗️ Build application
         run: npm run build
-
-      - name: 🎭 Run Playwright tests
-        run: npx playwright test
+        
+      - name: 🎭 Run Authentication E2E Tests
+        run: npm run test:e2e:auth
         env:
-          # Add environment variables for testing
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-
-      - name: 📤 Upload test results
+          # Environment configuration
+          NODE_ENV: test
+          CI: true
+          # Supabase configuration
+          VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
+          VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
+          # Google OAuth configuration
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          
+      - name: 📤 Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-auth-report
+          path: playwright-report/
+          retention-days: 30
+          
+      - name: 📤 Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 30
+          
+      - name: 📤 Upload Screenshots
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: playwright-screenshots
+          path: test-results/
           retention-days: 30
 
-  # Job 4: Build & Deploy
-  build-and-deploy:
-    name: 🚀 Build & Deploy
+  # Job 4: Component E2E Tests (parallel)
+  component-e2e-tests:
+    name: 🎨 Component E2E Tests
     runs-on: ubuntu-latest
-    needs: [lint-and-format, test, e2e-tests]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
+    needs: lint-and-format
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 📥 Install dependencies
         run: npm ci
+        
+      - name: 📥 Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        
+      - name: 🎨 Run Component E2E Tests
+        run: npm run test:e2e:components
+        env:
+          NODE_ENV: test
+          CI: true
+          VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
+          VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
+          
+      - name: 📤 Upload Component Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-test-results
+          path: test-results/
+          retention-days: 30
 
+  # Job 5: User Story E2E Tests (parallel)
+  user-story-e2e-tests:
+    name: 📖 User Story E2E Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-format
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📥 Install dependencies
+        run: npm ci
+        
+      - name: 📥 Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+        
+      - name: 📖 Run User Story E2E Tests
+        run: npm run test:e2e:stories
+        env:
+          NODE_ENV: test
+          CI: true
+          VITE_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_PUBLIC_SUPABASE_URL }}
+          VITE_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_PUBLIC_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          
+      - name: 📤 Upload User Story Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-story-test-results
+          path: test-results/
+          retention-days: 30
+
+  # Job 6: Build & Deploy
+  build-and-deploy:
+    name: 🚀 Build & Deploy
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, test, e2e-tests, component-e2e-tests, user-story-e2e-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: 📥 Install dependencies
+        run: npm ci
+        
       - name: 🏗️ Build application
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
-
+          
       - name: 📤 Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
           retention-days: 7
-
+          
       # Deploy to Vercel (if using Vercel)
       - name: 🚀 Deploy to Vercel
         if: success()
@@ -150,21 +249,21 @@ jobs:
   security-audit:
     name: 🔒 Security Audit
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 🔒 Run npm audit
         run: npm audit --audit-level moderate
         continue-on-error: true
-
+        
       - name: 🔍 Check for vulnerabilities
         run: npm audit --audit-level high
 
@@ -174,25 +273,25 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: github.event_name == 'pull_request'
-
+    
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
-
+        
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
+          
       - name: 📥 Install dependencies
         run: npm ci
-
+        
       # TODO: Generate coverage when tests are implemented
       - name: 📊 Generate coverage report
         run: echo "Coverage reporting not yet implemented"
         # run: npm run test:coverage
-
+        
       # TODO: Upload to Codecov when ready
       # - name: 📤 Upload coverage to Codecov
       #   uses: codecov/codecov-action@v3

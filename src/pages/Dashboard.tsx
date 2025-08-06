@@ -58,9 +58,7 @@ export default function Dashboard() {
   const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
   const [_userMetadata, setUserMetadata] = useState<UserMetadata | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
   const [_budgetInsights, setBudgetInsights] = useState<BudgetInsights | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>('USD')
@@ -342,7 +340,8 @@ export default function Dashboard() {
       setIsScanning(true)
 
       // Simulate Gmail scanning with the stored token
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions()
+      const parsedTrials: ParsedTrialEmail[] =
+        await gmailIntegration.fetchAndParseSubscriptions()
 
       console.log('Parsed trials from Gmail:', parsedTrials)
 
@@ -409,7 +408,8 @@ export default function Dashboard() {
     setIsScanning(true)
 
     try {
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions()
+      const parsedTrials: ParsedTrialEmail[] =
+        await gmailIntegration.fetchAndParseSubscriptions()
 
       console.log('Parsed trials from Gmail:', parsedTrials)
 

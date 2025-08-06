@@ -142,7 +142,7 @@ export interface ExchangeRates {
 // Subscription frequency mapping
 export type SubscriptionFrequency = 'monthly' | 'yearly' | 'weekly'
 
-// Subscription status mapping
+// Subscription status mapping  
 export type SubscriptionStatus = 'active' | 'cancelled' | 'trial' | 'pending'
 
 // Alert status mapping

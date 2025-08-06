@@ -11,7 +11,19 @@
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:auth": "playwright test --config=playwright-auth.config.ts",
+    "test:e2e:auth:ui": "playwright test --config=playwright-auth.config.ts --ui",
+    "test:e2e:auth:headed": "playwright test --config=playwright-auth.config.ts --headed",
+    "test:e2e:auth:debug": "playwright test --config=playwright-auth.config.ts --debug",
+    "test:e2e:auth:chromium": "playwright test --config=playwright-auth.config.ts --project=chromium",
+    "test:e2e:auth:firefox": "playwright test --config=playwright-auth.config.ts --project=firefox",
+    "test:e2e:auth:mobile": "playwright test --config=playwright-auth.config.ts --project='Mobile Chrome'",
+    "test:e2e:components": "playwright test --config=playwright-auth.config.ts auth-components-e2e.spec.ts",
+    "test:e2e:stories": "playwright test --config=playwright-auth.config.ts user-stories-e2e.spec.ts",
+    "test:e2e:full": "playwright test --config=playwright-auth.config.ts auth-onboarding-e2e.spec.ts",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.1",
@@ -22,6 +34,7 @@
     "react-router-dom": "^6.20.1"
   },
   "devDependencies": {
+    "@faker-js/faker": "^9.9.0",
     "@playwright/test": "^1.54.2",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",

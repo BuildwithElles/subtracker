@@ -58,9 +58,7 @@ export function GmailTestComponent() {
           '- Figma: $12.00/month (active)'
       )
     } catch (error) {
-      setTestResult(
-        `❌ Parser test failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      )
+      setTestResult(`❌ Parser test failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }

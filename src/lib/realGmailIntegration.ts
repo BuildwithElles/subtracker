@@ -75,7 +75,7 @@ export class RealGmailIntegration {
         try {
           // TODO: Implement actual Gmail API integration when googleapis is available
           throw new Error('Gmail API not available - googleapis package not installed')
-
+          
           // const searchResults = await gmail.users.messages.list({
           //   userId: 'me',
           //   q: query,

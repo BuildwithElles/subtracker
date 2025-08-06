@@ -289,9 +289,7 @@ class WeeklyDigestSystem {
   }
 
   // Get top spending categories
-  private getTopCategories(
-    subscriptions: Subscription[]
-  ): Array<{ category: string; amount: number }> {
+  private getTopCategories(subscriptions: Subscription[]): Array<{ category: string; amount: number }> {
     const categorySpending: { [key: string]: number } = {}
 
     subscriptions
@@ -309,7 +307,10 @@ class WeeklyDigestSystem {
   }
 
   // Generate personalized recommendations
-  private generateRecommendations(stats: DigestStats, subscriptions: Subscription[]): string[] {
+  private generateRecommendations(
+    stats: DigestStats,
+    subscriptions: Subscription[]
+  ): string[] {
     const recommendations: string[] = []
 
     // Budget-based recommendations
