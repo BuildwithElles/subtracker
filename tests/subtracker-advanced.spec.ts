@@ -27,9 +27,9 @@ const mockBudget = {
 // Helper functions - currently unused but kept for future test development
 async function _signUpUser(page: Page, email: string, password: string) {
   await page.goto('/signup')
-  await page.fill('input[name="email"]', email)
-  await page.fill('input[name="password"]', password)
-  await page.click('button[type="submit"]')
+  await page.fill('[data-testid="email-input"]', email)
+  await page.fill('[data-testid="password-input"]', password)
+  await page.click('[data-testid="submit-button"]')
   // Wait for redirect to dashboard
   await page.waitForURL('**/dashboard')
 }
@@ -77,9 +77,9 @@ test.describe('SubTracker Advanced Features', () => {
       await page.goto('/signup')
 
       // Check form elements
-      await expect(page.locator('input[name="email"]')).toBeVisible()
-      await expect(page.locator('input[name="password"]')).toBeVisible()
-      await expect(page.locator('button[type="submit"]')).toBeVisible()
+      await expect(page.locator('[data-testid="email-input"]')).toBeVisible()
+      await expect(page.locator('[data-testid="password-input"]')).toBeVisible()
+      await expect(page.locator('[data-testid="submit-button"]')).toBeVisible()
 
       // Test form validation
       await page.click('button[type="submit"]')

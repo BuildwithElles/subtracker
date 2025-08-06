@@ -13,9 +13,9 @@ test.describe('Subtracker App', () => {
 
   test('Signup flow works', async ({ page }) => {
     await page.goto('https://subtracker-ecru.vercel.app/signup')
-    await page.fill('input[name="email"]', 'testuser@example.com')
-    await page.fill('input[name="password"]', 'password123')
-    await page.click('button[type="submit"]:has-text("Sign Up")')
+    await page.fill('[data-testid="email-input"]', 'testuser@example.com')
+    await page.fill('[data-testid="password-input"]', 'password123')
+    await page.click('[data-testid="submit-button"]')
     // Note: This will likely fail since we don't have dashboard yet
     // await expect(page).toHaveURL(/dashboard/);
   })

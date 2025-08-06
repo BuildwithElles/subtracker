@@ -292,6 +292,7 @@ export default function SignUp() {
                   name="fullName"
                   type="text"
                   autoComplete="name"
+                  data-testid="full-name-input"
                   className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
                     errors.fullName ? 'border-red-300' : 'border-gray-300'
                   } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -314,6 +315,7 @@ export default function SignUp() {
                 type="email"
                 autoComplete="email"
                 required
+                data-testid="email-input"
                 className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
                   errors.email ? 'border-red-300' : 'border-gray-300'
                 } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -336,6 +338,7 @@ export default function SignUp() {
                   type={showPassword ? 'text' : 'password'}
                   autoComplete={isLoginMode ? 'current-password' : 'new-password'}
                   required
+                  data-testid="password-input"
                   className={`appearance-none relative block w-full px-3 py-2 pr-10 border ${
                     errors.password ? 'border-red-300' : 'border-gray-300'
                   } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -434,6 +437,7 @@ export default function SignUp() {
                     type={showConfirmPassword ? 'text' : 'password'}
                     autoComplete="new-password"
                     required
+                    data-testid="confirm-password-input"
                     className={`appearance-none relative block w-full px-3 py-2 pr-10 border ${
                       errors.confirmPassword ? 'border-red-300' : 'border-gray-300'
                     } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -519,6 +523,7 @@ export default function SignUp() {
                   id="referrerCode"
                   name="referrerCode"
                   type="text"
+                  data-testid="referrer-code-input"
                   className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
                     errors.referrerCode ? 'border-red-300' : 'border-gray-300'
                   } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -538,6 +543,7 @@ export default function SignUp() {
             <button
               type="submit"
               disabled={loading}
+              data-testid="submit-button"
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
             >
               {loading ? (
@@ -591,6 +597,7 @@ export default function SignUp() {
                 type="button"
                 onClick={handleGoogleSignUp}
                 disabled={loading}
+                data-testid="google-signup-button"
                 className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
               >
                 {loading ? (

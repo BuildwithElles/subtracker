@@ -10,9 +10,9 @@ test.describe('Subtracker App - Local', () => {
 
   test('Signup page loads with form', async ({ page }) => {
     await page.goto('http://localhost:3000/signup')
-    await expect(page.locator('input[name="email"]')).toBeVisible()
-    await expect(page.locator('input[name="password"]')).toBeVisible()
-    await expect(page.locator('button[type="submit"]:has-text("Sign Up")')).toBeVisible()
+    await expect(page.locator('[data-testid="email-input"]')).toBeVisible()
+    await expect(page.locator('[data-testid="password-input"]')).toBeVisible()
+    await expect(page.locator('[data-testid="submit-button"]')).toBeVisible()
   })
 
   test('Dashboard loads', async ({ page }) => {

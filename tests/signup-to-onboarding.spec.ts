@@ -12,12 +12,12 @@ test.describe('Complete Signup to Onboarding Flow', () => {
     await expect(page.locator('h2:has-text("Create your account")')).toBeVisible()
 
     // Step 2: Fill out signup form
-    await page.locator('input[placeholder="Enter your email"]').fill(testEmail)
-    await page.locator('input[placeholder="Create a strong password"]').fill(testPassword)
-    await page.locator('input[placeholder="Confirm your password"]').fill(testPassword)
+    await page.locator('[data-testid="email-input"]').fill(testEmail)
+    await page.locator('[data-testid="password-input"]').fill(testPassword)
+    await page.locator('[data-testid="confirm-password-input"]').fill(testPassword)
 
     // Submit the form
-    await page.locator('button:has-text("Create Account")').click()
+    await page.locator('[data-testid="submit-button"]').click()
 
     // Step 3: Should redirect to onboarding (may take some time for auth)
     await page.waitForTimeout(3000)
