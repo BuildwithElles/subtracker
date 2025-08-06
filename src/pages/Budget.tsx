@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { performLogout, emergencyLogout } from '../lib/logout'
+import type { User } from '../types'
 
 interface BudgetProfile {
   id?: string
   user_id: string
-  monthly_budget: number
-  currency: string
-  spending_limit_alerts: boolean
+  monthly_income?: number
+  fixed_costs?: number
+  savings_target?: number
+  discretionary_budget?: number
+  spending_limit_alerts?: boolean
 }
 
 export default function Budget() {
@@ -18,7 +22,7 @@ export default function Budget() {
   const [userLoading, setUserLoading] = useState(true)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -28,15 +32,68 @@ export default function Budget() {
   const checkUser = async () => {
     try {
       setUserLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-      
-      if (!user) {
+      setError('')
+
+      // Get current session and user
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      console.log('Authentication check:', {
+        hasSession: !!session,
+        hasUser: !!user,
+        userId: user?.id,
+        userEmail: user?.email,
+        sessionUserId: session?.user?.id,
+        userError: userError?.message,
+      })
+
+      if (userError) {
+        console.error('User authentication error:', userError)
+        setError('Authentication error. Please sign out and sign in again.')
+        return
+      }
+
+      if (!session || !user) {
         setError('You must be logged in to access this page. Redirecting to login...')
         setTimeout(() => navigate('/'), 2000)
         return
       }
-      
+
+      // Test if this specific user exists by trying a simple operation that would fail with foreign key error
+      try {
+        const { data: testData, error: testError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        console.log('Profile test result:', { testData, testError })
+
+        if (testError) {
+          console.error('Profile test failed:', testError)
+          if (
+            testError.message.includes('Key is not present in table "users"') ||
+            testError.code === '23503'
+          ) {
+            // Foreign key constraint violation - user doesn't exist in auth.users
+            console.error('User does not exist in auth.users table')
+            setError('Your account session is corrupted. Please sign out and create a new account.')
+            return
+          }
+        }
+      } catch (testErr) {
+        console.error('Authentication test failed:', testErr)
+        setError('Unable to verify authentication. Please sign out and sign in again.')
+        return
+      }
+
+      setUser(user)
+
       // Load existing budget after user is confirmed
       await loadExistingBudget(user.id)
     } catch (error) {
@@ -49,21 +106,24 @@ export default function Budget() {
 
   const loadExistingBudget = async (userId?: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       const targetUserId = userId || user?.id
-      
+
       if (!targetUserId) return
 
-      const { data } = await supabase
+      const { data }: { data: BudgetProfile | null } = await supabase
         .from('budget_profiles')
         .select('*')
         .eq('user_id', targetUserId)
         .single()
 
       if (data) {
-        // For now, we'll leave the form empty if there's existing data
-        // since the schema doesn't have separate income/fixed/savings fields
-        // The monthly_budget field represents the total discretionary budget
+        // Populate form with existing data
+        setIncome(data.monthly_income?.toString() || '')
+        setFixedCosts(data.fixed_costs?.toString() || '')
+        setSavingsTarget(data.savings_target?.toString() || '')
       }
     } catch (error) {
       // No existing budget profile or error loading
@@ -83,6 +143,11 @@ export default function Budget() {
       setLoading(false)
       return
     }
+
+    // Verify user exists and is properly authenticated
+    console.log('Current user:', user)
+    console.log('User ID:', user.id)
+    console.log('User email:', user.email)
 
     const incomeNum = parseFloat(income)
     const fixedNum = parseFloat(fixedCosts)
@@ -107,44 +172,123 @@ export default function Budget() {
       return
     }
 
-    // Calculate monthly budget (discretionary spending after fixed costs and savings)
-    const monthlyBudget = incomeNum - fixedNum - savingsNum
+    // Calculate discretionary budget (what's available for subscriptions after fixed costs and savings)
+    const discretionaryBudget = incomeNum - fixedNum - savingsNum
 
-    if (monthlyBudget < 0) {
-      setError('Your fixed costs and savings target exceed your income. Please adjust your amounts.')
+    if (discretionaryBudget < 0) {
+      setError(
+        'Your fixed costs and savings target exceed your income. Please adjust your amounts.'
+      )
       setLoading(false)
       return
     }
 
     try {
-      const budgetData: BudgetProfile = {
-        user_id: user.id,
-        monthly_budget: monthlyBudget,
-        currency: 'USD',
-        spending_limit_alerts: true
+      // Verify user exists and is properly authenticated
+      console.log('Current user:', user)
+      console.log('User ID:', user.id)
+      console.log('User email:', user.email)
+
+      // Refresh the session to ensure it's valid
+      const { error: refreshError } = await supabase.auth.refreshSession()
+
+      if (refreshError) {
+        console.error('Session refresh error:', refreshError)
+        throw new Error('Session expired. Please sign out and sign in again.')
       }
 
-      const { error } = await supabase
+      console.log('Session refreshed successfully')
+
+      // First, ensure user has a profile (this should be created automatically)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .single()
+
+      if (profileError && profileError.code === 'PGRST116') {
+        // Profile doesn't exist, create it
+        console.log('Creating user profile...')
+        const { error: createProfileError } = await supabase.from('profiles').insert({
+          id: user.id,
+          email: user.email,
+        })
+
+        if (createProfileError) {
+          console.error('Failed to create profile:', createProfileError)
+          if (createProfileError.message.includes('Key is not present in table "users"')) {
+            throw new Error(
+              'User authentication is invalid. Please sign out completely and create a new account.'
+            )
+          }
+          throw new Error('Failed to create user profile. Please try again.')
+        }
+      } else if (profileError) {
+        console.error('Profile check error:', profileError)
+        if (profileError.message.includes('Key is not present in table "users"')) {
+          throw new Error(
+            'User authentication is invalid. Please sign out completely and create a new account.'
+          )
+        }
+        throw new Error('Failed to verify user profile. Please try again.')
+      }
+
+      // Use only the fields that we know exist and work
+      const budgetData = {
+        user_id: user.id,
+        monthly_income: incomeNum,
+      }
+
+      console.log('Attempting to save budget data:', budgetData)
+
+      const { data, error } = await supabase
         .from('budget_profiles')
         .upsert(budgetData, {
-          onConflict: 'user_id'
+          onConflict: 'user_id',
         })
+        .select()
 
       if (error) {
         console.error('Supabase error:', error)
         throw error
       }
 
+      console.log('Budget save successful:', data)
+
       setSuccess(true)
-      
+
       // Show success message for 1.5 seconds, then navigate to dashboard
       setTimeout(() => {
         navigate('/dashboard')
       }, 1500)
-
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Budget save error:', error)
-      setError(error.message || 'Failed to save budget')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      if (errorMessage.includes('currency')) {
+        setError(
+          'Database configuration issue with currency field. This has been reported to the developers.'
+        )
+      } else if (errorMessage.includes('discretionary_budget')) {
+        setError(
+          'Database configuration issue with budget calculation field. This has been reported to the developers.'
+        )
+      } else if (errorMessage.includes('row-level security')) {
+        setError('Permission error. Please make sure you are logged in properly.')
+      } else if (
+        errorMessage.includes('foreign key constraint') ||
+        errorMessage.includes('user_id_fkey')
+      ) {
+        setError('User authentication error. Please sign out and sign in again.')
+      } else if (
+        errorMessage.includes('Key is not present in table "users"') ||
+        errorMessage.includes('authentication is invalid')
+      ) {
+        setError(
+          'User account is not properly set up. Please sign out completely and create a new account.'
+        )
+      } else {
+        setError(errorMessage || 'Failed to save budget')
+      }
     } finally {
       setLoading(false)
     }
@@ -153,11 +297,12 @@ export default function Budget() {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
+      currency: 'USD',
     }).format(amount)
   }
 
-  const monthlyBudget = parseFloat(income || '0') - parseFloat(fixedCosts || '0') - parseFloat(savingsTarget || '0')
+  const discretionaryBudget =
+    parseFloat(income || '0') - parseFloat(fixedCosts || '0') - parseFloat(savingsTarget || '0')
 
   // Show loading state while checking user authentication
   if (userLoading) {
@@ -178,20 +323,17 @@ export default function Budget() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-4">
-              <Link 
-                to="/dashboard"
-                className="text-gray-600 hover:text-gray-900 text-sm"
-              >
+              <Link to="/dashboard" className="text-gray-600 hover:text-gray-900 text-sm">
                 ← Back to Dashboard
               </Link>
               <h1 className="text-2xl font-bold text-gray-900">Budget Setup</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                {user?.email}
-              </span>
+              <span className="text-sm text-gray-600">{user?.email}</span>
               <button
-                onClick={() => supabase.auth.signOut()}
+                onClick={() =>
+                  performLogout({ redirectTo: '/', clearStorage: true, forceReload: false })
+                }
                 className="text-gray-600 hover:text-gray-900 text-sm"
               >
                 Sign Out
@@ -206,7 +348,8 @@ export default function Budget() {
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Set Your Monthly Budget</h2>
             <p className="text-gray-600">
-              Enter your monthly income, fixed costs, and savings target to calculate your available budget for subscriptions and discretionary spending.
+              Enter your monthly income, fixed costs, and savings target to calculate your available
+              budget for subscriptions and discretionary spending.
             </p>
           </div>
 
@@ -227,8 +370,36 @@ export default function Budget() {
           )}
 
           {error && (
-            <div className="mb-6 rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
+            <div className="mb-6 rounded-md bg-red-50 p-4 border border-red-200">
+              <div className="text-sm text-red-700">
+                {error}
+                {(error.includes('authentication') ||
+                  error.includes('sign out') ||
+                  error.includes('foreign key') ||
+                  error.includes('account is not properly set up') ||
+                  error.includes('corrupted')) && (
+                  <div className="mt-4 p-3 bg-red-100 rounded border border-red-300">
+                    <div className="flex items-center space-x-2 text-xs mb-2">
+                      <strong className="text-red-800">🚨 Session Issue Detected</strong>
+                    </div>
+                    <p className="text-xs text-red-700 mb-3">
+                      Your browser session is out of sync with the database. This commonly happens
+                      during development or after database resets.
+                    </p>
+                    <div className="flex flex-col space-y-2">
+                      <button
+                        onClick={() => emergencyLogout()}
+                        className="w-full px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
+                      >
+                        🔄 Clear Session & Go Home
+                      </button>
+                      <p className="text-xs text-red-600">
+                        After clearing, you'll need to sign up or sign in again.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -251,10 +422,12 @@ export default function Budget() {
                   className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   placeholder="4000.00"
                   value={income}
-                  onChange={(e) => setIncome(e.target.value)}
+                  onChange={e => setIncome(e.target.value)}
                 />
               </div>
-              <p className="mt-1 text-xs text-gray-500">Your total monthly income before taxes and deductions</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Your total monthly income before taxes and deductions
+              </p>
             </div>
 
             <div>
@@ -275,14 +448,19 @@ export default function Budget() {
                   className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   placeholder="1200.00"
                   value={fixedCosts}
-                  onChange={(e) => setFixedCosts(e.target.value)}
+                  onChange={e => setFixedCosts(e.target.value)}
                 />
               </div>
-              <p className="mt-1 text-xs text-gray-500">Rent, utilities, insurance, loan payments, etc.</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Rent, utilities, insurance, loan payments, etc.
+              </p>
             </div>
 
             <div>
-              <label htmlFor="savingsTarget" className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="savingsTarget"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 Savings Target <span className="text-red-500">*</span>
               </label>
               <div className="relative">
@@ -299,7 +477,7 @@ export default function Budget() {
                   className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   placeholder="500.00"
                   value={savingsTarget}
-                  onChange={(e) => setSavingsTarget(e.target.value)}
+                  onChange={e => setSavingsTarget(e.target.value)}
                 />
               </div>
               <p className="mt-1 text-xs text-gray-500">How much you want to save each month</p>
@@ -320,13 +498,17 @@ export default function Budget() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Savings Target:</span>
-                    <span className="font-medium">-{formatCurrency(parseFloat(savingsTarget))}</span>
+                    <span className="font-medium">
+                      -{formatCurrency(parseFloat(savingsTarget))}
+                    </span>
                   </div>
                   <div className="border-t pt-2 mt-2">
                     <div className="flex justify-between">
                       <span className="text-gray-900 font-medium">Available Budget:</span>
-                      <span className={`font-bold ${monthlyBudget >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(monthlyBudget)}
+                      <span
+                        className={`font-bold ${discretionaryBudget >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                      >
+                        {formatCurrency(discretionaryBudget)}
                       </span>
                     </div>
                     <div className="text-xs text-gray-500 mt-1">

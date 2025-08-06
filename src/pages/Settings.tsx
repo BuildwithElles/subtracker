@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { performLogout } from '../lib/logout'
 
 export default function Settings() {
   const [user, setUser] = useState<any>(null)
@@ -14,20 +15,24 @@ export default function Settings() {
   }, [])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     setUser(user)
   }
 
   const loadGmailSyncStatus = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (user) {
         const { data } = await supabase
           .from('profiles')
           .select('gmail_sync_enabled')
           .eq('id', user.id)
           .single()
-        
+
         setGmailSyncEnabled(data?.gmail_sync_enabled || false)
       }
     } catch (error) {
@@ -37,24 +42,22 @@ export default function Settings() {
 
   const toggleGmailSync = async () => {
     if (!user) return
-    
+
     setLoading(true)
     try {
       const newStatus = !gmailSyncEnabled
-      
+
       // Update user metadata in Supabase
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({ 
-          id: user.id, 
-          gmail_sync_enabled: newStatus,
-          updated_at: new Date().toISOString()
-        })
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id,
+        gmail_sync_enabled: newStatus,
+        updated_at: new Date().toISOString(),
+      })
 
       if (error) throw error
 
       setGmailSyncEnabled(newStatus)
-      
+
       // Show confirmation message
       if (newStatus) {
         alert('Gmail sync enabled! Your subscriptions will be automatically detected from Gmail.')
@@ -73,9 +76,7 @@ export default function Settings() {
     setExportLoading(true)
     try {
       // Fetch user's subscription data
-      const { data: subscriptions } = await supabase
-        .from('subscriptions')
-        .select('*')
+      const { data: subscriptions } = await supabase.from('subscriptions').select('*')
 
       if (!subscriptions || subscriptions.length === 0) {
         alert('No subscriptions found to export.')
@@ -83,7 +84,16 @@ export default function Settings() {
       }
 
       // Create CSV content
-      const headers = ['Name', 'Cost', 'Currency', 'Billing Cycle', 'Next Payment', 'Category', 'Status', 'Description']
+      const headers = [
+        'Name',
+        'Cost',
+        'Currency',
+        'Billing Cycle',
+        'Next Payment',
+        'Category',
+        'Status',
+        'Description',
+      ]
       const csvRows = [headers.join(',')]
 
       subscriptions.forEach(sub => {
@@ -95,7 +105,7 @@ export default function Settings() {
           `"${sub.next_payment_date || ''}"`,
           `"${sub.category || ''}"`,
           `"${sub.status || 'active'}"`,
-          `"${sub.description || ''}"`
+          `"${sub.description || ''}"`,
         ]
         csvRows.push(row.join(','))
       })
@@ -153,21 +163,18 @@ export default function Settings() {
         .from('subscriptions')
         .delete()
         .eq('user_id', user.id)
-      
+
       if (subscriptionsError) throw subscriptionsError
 
       const { error: budgetError } = await supabase
         .from('budget_profiles')
         .delete()
         .eq('user_id', user.id)
-      
+
       if (budgetError) throw budgetError
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user.id)
-      
+      const { error: profileError } = await supabase.from('profiles').delete().eq('id', user.id)
+
       if (profileError) throw profileError
 
       // Delete the user account from Supabase Auth
@@ -175,12 +182,11 @@ export default function Settings() {
       if (authError) {
         console.warn('Could not delete auth user (admin access required):', authError)
       }
-      
-      // Sign out the user
-      await supabase.auth.signOut()
-      
+
+      // Sign out the user with complete cleanup
+      performLogout({ redirectTo: '/', clearStorage: true, forceReload: true })
+
       alert('Your account has been successfully deleted.')
-      window.location.href = '/'
     } catch (error) {
       console.error('Account deletion failed:', error)
       alert('Failed to delete account. Please contact support if this issue persists.')
@@ -196,20 +202,17 @@ export default function Settings() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-4">
-              <Link 
-                to="/dashboard"
-                className="text-gray-600 hover:text-gray-900 text-sm"
-              >
+              <Link to="/dashboard" className="text-gray-600 hover:text-gray-900 text-sm">
                 ← Back to Dashboard
               </Link>
               <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                {user?.email}
-              </span>
+              <span className="text-sm text-gray-600">{user?.email}</span>
               <button
-                onClick={() => supabase.auth.signOut()}
+                onClick={() =>
+                  performLogout({ redirectTo: '/', clearStorage: true, forceReload: false })
+                }
                 className="text-gray-600 hover:text-gray-900 text-sm"
               >
                 Sign Out
@@ -221,7 +224,6 @@ export default function Settings() {
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="space-y-6">
-          
           {/* Account Information */}
           <div className="bg-white shadow rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
@@ -306,7 +308,8 @@ export default function Settings() {
                 <div>
                   <h3 className="text-sm font-medium text-gray-900">Export Subscriptions as CSV</h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Download all your subscription data in CSV format for easy import into other applications
+                    Download all your subscription data in CSV format for easy import into other
+                    applications
                   </p>
                 </div>
                 <button
@@ -329,11 +332,11 @@ export default function Settings() {
               <div>
                 <h3 className="text-sm font-medium text-gray-900">Data Privacy</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Your data is encrypted and never shared with third parties. We only access your Gmail 
-                  to detect subscription-related emails.
+                  Your data is encrypted and never shared with third parties. We only access your
+                  Gmail to detect subscription-related emails.
                 </p>
               </div>
-              
+
               <div>
                 <h3 className="text-sm font-medium text-gray-900">Change Password</h3>
                 <p className="text-sm text-gray-500 mt-1">
@@ -356,7 +359,8 @@ export default function Settings() {
                 <div>
                   <h3 className="text-sm font-medium text-red-900">Delete Account</h3>
                   <p className="text-sm text-red-600 mt-1">
-                    Permanently delete your account and all associated data. This action cannot be undone.
+                    Permanently delete your account and all associated data. This action cannot be
+                    undone.
                   </p>
                 </div>
                 <button
@@ -369,7 +373,6 @@ export default function Settings() {
               </div>
             </div>
           </div>
-
         </div>
       </main>
     </div>

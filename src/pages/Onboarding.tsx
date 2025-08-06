@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
+import { ParsedTrialEmail } from '../lib/gmailParser'
+import { fetchGmailIntegration } from '../lib/fetchGmailIntegration'
+import { googleAuthService } from '../lib/googleAuth'
 
 export default function Onboarding() {
   const [currentStep, setCurrentStep] = useState(1)
@@ -11,20 +13,56 @@ export default function Onboarding() {
   const [foundSubscriptions, setFoundSubscriptions] = useState<ParsedTrialEmail[]>([])
   const [error, setError] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
+  const [hasCheckedUser, setHasCheckedUser] = useState(false)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
   useEffect(() => {
-    checkUser()
-  }, [])
+    // Add a small delay to prevent flashing
+    const initializeComponent = async () => {
+      await new Promise(resolve => setTimeout(resolve, 100)) // Small delay
+      checkUser()
+    }
+
+    initializeComponent()
+
+    // Listen for auth state changes (e.g., email confirmation)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setCurrentUser(session.user)
+        setHasCheckedUser(true)
+
+        // If user just signed in and hasn't completed onboarding, start onboarding
+        if (!session.user.user_metadata?.onboarding_completed) {
+          setInitializing(false)
+        }
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, []) // Remove currentUser from dependencies
+
+  // Separate effect for handling Gmail OAuth callback
+  useEffect(() => {
+    const gmailConnected = searchParams.get('gmail_connected')
+    if (gmailConnected === 'true' && currentUser && !isScanning) {
+      handleGmailScan()
+    }
+  }, [searchParams, currentUser]) // Only when searchParams or currentUser changes
 
   const checkUser = async () => {
     try {
       setInitializing(true)
       setError(null)
-      
-      const { data: { user } } = await supabase.auth.getUser()
-      
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
       if (!user) {
         // Allow some time for auth to complete in case of redirect
         setTimeout(() => {
@@ -34,6 +72,7 @@ export default function Onboarding() {
       }
 
       setCurrentUser(user)
+      setHasCheckedUser(true)
 
       // Check if user has already completed onboarding
       if (user.user_metadata?.onboarding_completed) {
@@ -44,7 +83,7 @@ export default function Onboarding() {
       // Initialize step from URL or user metadata
       const urlStep = searchParams.get('step')
       const metadataStep = user.user_metadata?.onboarding_step
-      
+
       if (urlStep && !isNaN(parseInt(urlStep))) {
         const step = Math.min(Math.max(parseInt(urlStep), 1), 3)
         setCurrentStep(step)
@@ -54,7 +93,6 @@ export default function Onboarding() {
 
       // Ensure user has a profile
       await ensureUserProfile(user)
-      
     } catch (err) {
       console.error('Error checking user:', err)
       setError('Failed to load user information. Please try refreshing the page.')
@@ -74,14 +112,12 @@ export default function Onboarding() {
 
       if (!existingProfile) {
         // Create profile if it doesn't exist
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert({
-            id: user.id,
-            email: user.email,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
+        const { error: profileError } = await supabase.from('profiles').insert({
+          id: user.id,
+          email: user.email,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
 
         if (profileError) {
           console.error('Error creating user profile:', profileError)
@@ -92,54 +128,54 @@ export default function Onboarding() {
     }
   }
 
+  const handleGmailScan = async () => {
+    if (!currentUser) return
+
+    try {
+      setIsScanning(true)
+      setError(null)
+
+      // Get Gmail access token from user profile
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('gmail_access_token')
+        .eq('id', currentUser.id)
+        .single()
+
+      if (profileError || !profile?.gmail_access_token) {
+        throw new Error('Gmail access token not found. Please reconnect Gmail.')
+      }
+
+      console.log('🔍 Scanning Gmail for subscriptions...')
+
+      // Use real Gmail integration to scan emails
+      const parsedTrials = await fetchGmailIntegration.fetchAndParseSubscriptions(
+        profile.gmail_access_token
+      )
+      setFoundSubscriptions(parsedTrials)
+
+      console.log('✅ Gmail scan complete:', parsedTrials)
+      setCurrentStep(2)
+    } catch (error) {
+      console.error('Gmail scan error:', error)
+      setError(error instanceof Error ? error.message : 'Failed to scan Gmail')
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
   const handleGmailConnect = async () => {
     setLoading(true)
 
     try {
-      // In a real implementation, this would trigger Google OAuth
-      const mockAccessToken = 'mock-gmail-access-token-' + Date.now()
-      
-      // Store the access token in the user's profile
-      if (currentUser) {
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: currentUser.id,
-            gmail_access_token: mockAccessToken,
-            updated_at: new Date().toISOString()
-          })
-
-        if (profileError) {
-          console.error('Error storing Gmail token:', profileError)
-          setError('Failed to store Gmail access token')
-          setLoading(false)
-          return
-        }
-
-        // Update user metadata
-        await supabase.auth.updateUser({
-          data: { 
-            gmail_connected: true,
-            onboarding_step: 2
-          }
-        })
-      }
-      
-      setIsScanning(true)
-      
-      // Simulate Gmail scanning
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions(mockAccessToken)
-      setFoundSubscriptions(parsedTrials)
-      
-      console.log('Parsed trials from Gmail:', parsedTrials)
-      setCurrentStep(2)
-      
+      // Redirect to Google OAuth instead of using mock token
+      const authUrl = googleAuthService.getAuthUrl()
+      console.log('Redirecting to Google OAuth...')
+      window.location.href = authUrl
     } catch (error) {
       console.error('Gmail connection error:', error)
       setError('Failed to connect Gmail. Please try again.')
-    } finally {
       setLoading(false)
-      setIsScanning(false)
     }
   }
 
@@ -147,10 +183,10 @@ export default function Onboarding() {
     try {
       // Mark Gmail as skipped but continue onboarding
       await supabase.auth.updateUser({
-        data: { 
+        data: {
           gmail_connected: false,
-          onboarding_step: 2
-        }
+          onboarding_step: 2,
+        },
       })
       setCurrentStep(2)
     } catch (error) {
@@ -167,10 +203,10 @@ export default function Onboarding() {
     try {
       // Mark onboarding as completed
       await supabase.auth.updateUser({
-        data: { 
+        data: {
           onboarding_completed: true,
-          onboarding_step: 3
-        }
+          onboarding_step: 3,
+        },
       })
       navigate('/dashboard')
     } catch (error) {
@@ -183,10 +219,10 @@ export default function Onboarding() {
     try {
       // Mark onboarding as completed
       await supabase.auth.updateUser({
-        data: { 
+        data: {
           onboarding_completed: true,
-          onboarding_step: 3
-        }
+          onboarding_step: 3,
+        },
       })
       navigate('/dashboard')
     } catch (error) {
@@ -199,7 +235,8 @@ export default function Onboarding() {
   const userName = currentUser?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'there'
   const displayName = currentUser ? userName.charAt(0).toUpperCase() + userName.slice(1) : 'there'
 
-  if (initializing) {
+  // Show loading state while initializing or if user hasn't been checked yet
+  if (initializing || (!currentUser && !hasCheckedUser)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -210,19 +247,20 @@ export default function Onboarding() {
     )
   }
 
-  if (!currentUser) {
+  // If we've checked for user but still don't have one, show loading (redirect will happen)
+  if (!currentUser && hasCheckedUser) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <p className="mt-4 text-gray-600">Redirecting to signup...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 transition-opacity duration-300 ease-in-out opacity-100">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -235,21 +273,34 @@ export default function Onboarding() {
             </div>
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2 text-sm text-gray-500">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                  currentStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`} data-testid="step-1">
+                <div
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
+                    currentStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}
+                  data-testid="step-1"
+                >
                   1
                 </div>
-                <div className={`w-8 h-0.5 ${currentStep >= 2 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                  currentStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`} data-testid="step-2">
+                <div
+                  className={`w-8 h-0.5 ${currentStep >= 2 ? 'bg-blue-600' : 'bg-gray-200'}`}
+                ></div>
+                <div
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
+                    currentStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}
+                  data-testid="step-2"
+                >
                   2
                 </div>
-                <div className={`w-8 h-0.5 ${currentStep >= 3 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                  currentStep >= 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
-                }`} data-testid="step-3">
+                <div
+                  className={`w-8 h-0.5 ${currentStep >= 3 ? 'bg-blue-600' : 'bg-gray-200'}`}
+                ></div>
+                <div
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
+                    currentStep >= 3 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                  }`}
+                  data-testid="step-3"
+                >
                   3
                 </div>
               </div>
@@ -265,7 +316,11 @@ export default function Onboarding() {
             <div className="flex">
               <div className="flex-shrink-0">
                 <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clipRule="evenodd"
+                  />
                 </svg>
               </div>
               <div className="ml-3">
@@ -280,7 +335,11 @@ export default function Onboarding() {
                   >
                     <span className="sr-only">Dismiss</span>
                     <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      <path
+                        fillRule="evenodd"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                   </button>
                 </div>
@@ -296,8 +355,18 @@ export default function Onboarding() {
           <div className="text-center">
             <div className="mb-8">
               <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                <svg
+                  className="w-10 h-10 text-blue-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
                 </svg>
               </div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -310,11 +379,9 @@ export default function Onboarding() {
 
             <div className="bg-white rounded-lg shadow-sm border p-8 max-w-2xl mx-auto">
               <div className="mb-6">
-                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                  Connect Your Gmail
-                </h2>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-2">Connect Your Gmail</h2>
                 <p className="text-gray-600">
-                  We'll automatically scan your inbox to find existing subscriptions and trials. 
+                  We'll automatically scan your inbox to find existing subscriptions and trials.
                   This saves you time and ensures you don't miss anything important.
                 </p>
               </div>
@@ -323,20 +390,50 @@ export default function Onboarding() {
                 <h3 className="font-semibold text-blue-900 mb-3">What we'll scan for:</h3>
                 <ul className="text-sm text-blue-800 space-y-2">
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-4 h-4 mr-2 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                     Active subscriptions and recurring payments
                   </li>
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-4 h-4 mr-2 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                     Free trials that are ending soon
                   </li>
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 mr-2 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-4 h-4 mr-2 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                     Billing receipts and invoices
                   </li>
@@ -351,19 +448,47 @@ export default function Onboarding() {
                 >
                   {loading || isScanning ? (
                     <div className="flex items-center">
-                      <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <svg
+                        className="animate-spin h-5 w-5 mr-2"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
                       </svg>
                       {isScanning ? 'Scanning your Gmail...' : 'Connecting...'}
                     </div>
                   ) : (
                     <>
                       <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        <path
+                          fill="#4285F4"
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                        />
+                        <path
+                          fill="#EA4335"
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                        />
                       </svg>
                       Connect Gmail & Scan for Subscriptions
                     </>
@@ -381,8 +506,8 @@ export default function Onboarding() {
 
               <div className="mt-6 text-xs text-gray-500">
                 <p>
-                  🔒 We only access your email to find subscription-related messages. 
-                  Your privacy is protected and you can disconnect at any time.
+                  🔒 We only access your email to find subscription-related messages. Your privacy
+                  is protected and you can disconnect at any time.
                 </p>
               </div>
 
@@ -394,8 +519,18 @@ export default function Onboarding() {
                   className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
                   Next
-                  <svg className="ml-2 -mr-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  <svg
+                    className="ml-2 -mr-1 w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
               </div>
@@ -408,30 +543,42 @@ export default function Onboarding() {
           <div className="text-center">
             <div className="mb-8">
               <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  className="w-10 h-10 text-green-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
               </div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {foundSubscriptions.length > 0 ? 'Great! We found your subscriptions' : 'Perfect! Now let\'s set your budget'}
+                {foundSubscriptions.length > 0
+                  ? 'Great! We found your subscriptions'
+                  : "Perfect! Now let's set your budget"}
               </h1>
               <p className="text-lg text-gray-600">
-                {foundSubscriptions.length > 0 
+                {foundSubscriptions.length > 0
                   ? `We discovered ${foundSubscriptions.length} subscription${foundSubscriptions.length !== 1 ? 's' : ''} in your Gmail`
-                  : 'Setting a budget helps you track spending and get alerts before you overspend'
-                }
+                  : 'Setting a budget helps you track spending and get alerts before you overspend'}
               </p>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border p-8 max-w-2xl mx-auto">
               {foundSubscriptions.length > 0 && (
                 <div className="mb-8">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Found Subscriptions:
-                  </h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Found Subscriptions:</h3>
                   <div className="space-y-2 text-left">
                     {foundSubscriptions.slice(0, 5).map((sub, index) => (
-                      <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                      <div
+                        key={index}
+                        className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
+                      >
                         <span className="font-medium">{sub.serviceName}</span>
                         <span className="text-green-600 font-semibold">${sub.amount}/month</span>
                       </div>
@@ -450,7 +597,8 @@ export default function Onboarding() {
                   Set Your Monthly Budget
                 </h2>
                 <p className="text-gray-600">
-                  This helps us track your spending and send you alerts when you're approaching your limits.
+                  This helps us track your spending and send you alerts when you're approaching your
+                  limits.
                 </p>
               </div>
 
@@ -482,8 +630,18 @@ export default function Onboarding() {
                   onClick={() => setCurrentStep(1)}
                   className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
-                  <svg className="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  <svg
+                    className="mr-2 -ml-1 w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
                   </svg>
                   Back
                 </button>
@@ -492,8 +650,18 @@ export default function Onboarding() {
                   className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
                   Next
-                  <svg className="ml-2 -mr-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  <svg
+                    className="ml-2 -mr-1 w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </button>
               </div>
@@ -506,13 +674,21 @@ export default function Onboarding() {
           <div className="text-center">
             <div className="mb-8">
               <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-10 h-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <svg
+                  className="w-10 h-10 text-purple-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                  />
                 </svg>
               </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                🎉 You're all set!
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">🎉 You're all set!</h1>
               <p className="text-lg text-gray-600">
                 Welcome to your SubTracker dashboard. Here's what you can do:
               </p>
@@ -522,42 +698,90 @@ export default function Onboarding() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="text-left p-4 bg-blue-50 rounded-lg">
                   <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mb-3">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    <svg
+                      className="w-4 h-4 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
                     </svg>
                   </div>
                   <h3 className="font-semibold text-gray-900 mb-1">Track Subscriptions</h3>
-                  <p className="text-sm text-gray-600">Monitor all your recurring payments in one place</p>
+                  <p className="text-sm text-gray-600">
+                    Monitor all your recurring payments in one place
+                  </p>
                 </div>
 
                 <div className="text-left p-4 bg-green-50 rounded-lg">
                   <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center mb-3">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                    <svg
+                      className="w-4 h-4 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"
+                      />
                     </svg>
                   </div>
                   <h3 className="font-semibold text-gray-900 mb-1">Budget Insights</h3>
-                  <p className="text-sm text-gray-600">Get smart alerts and spending recommendations</p>
+                  <p className="text-sm text-gray-600">
+                    Get smart alerts and spending recommendations
+                  </p>
                 </div>
 
                 <div className="text-left p-4 bg-yellow-50 rounded-lg">
                   <div className="w-8 h-8 bg-yellow-600 rounded-lg flex items-center justify-center mb-3">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    <svg
+                      className="w-4 h-4 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+                      />
                     </svg>
                   </div>
                   <h3 className="font-semibold text-gray-900 mb-1">Trial Alerts</h3>
-                  <p className="text-sm text-gray-600">Never get charged for forgotten free trials</p>
+                  <p className="text-sm text-gray-600">
+                    Never get charged for forgotten free trials
+                  </p>
                 </div>
 
                 <div className="text-left p-4 bg-purple-50 rounded-lg">
                   <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center mb-3">
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 002 2h2a2 2 0 012-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 00-2 2h-2a2 2 0 00-2 2v6a2 2 0 01-2 2H9z" />
+                    <svg
+                      className="w-4 h-4 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 002 2h2a2 2 0 012-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 00-2 2h-2a2 2 0 00-2 2v6a2 2 0 01-2 2H9z"
+                      />
                     </svg>
                   </div>
                   <h3 className="font-semibold text-gray-900 mb-1">Weekly Reports</h3>
-                  <p className="text-sm text-gray-600">Get detailed insights on your spending patterns</p>
+                  <p className="text-sm text-gray-600">
+                    Get detailed insights on your spending patterns
+                  </p>
                 </div>
               </div>
 
@@ -574,8 +798,18 @@ export default function Onboarding() {
                   onClick={() => setCurrentStep(2)}
                   className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
-                  <svg className="mr-2 -ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  <svg
+                    className="mr-2 -ml-1 w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 19l-7-7 7-7"
+                    />
                   </svg>
                   Back
                 </button>

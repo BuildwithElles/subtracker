@@ -1,6 +1,22 @@
 // Enhanced Budget Profile Integration with Advanced Analytics
 import { supabase } from './supabase'
+import type { Subscription } from '../types'
 
+// Local Budget Profile interface with currency field
+export interface BudgetProfile {
+  id?: string
+  user_id: string
+  monthly_income: number
+  fixed_costs: number
+  savings_target: number
+  discretionary_budget: number
+  currency: string
+  spending_limit_alerts: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+// Legacy interface - keeping for backward compatibility
 export interface BudgetInsights {
   currentPeriodSpending: number
   projectedMonthlySpending: number
@@ -15,19 +31,6 @@ export interface BudgetInsights {
   }>
   recommendations: string[]
   riskLevel: 'low' | 'medium' | 'high'
-}
-
-export interface BudgetProfile {
-  id?: string
-  user_id: string
-  monthly_income: number
-  fixed_costs: number
-  savings_target: number
-  discretionary_budget: number
-  currency: string
-  spending_limit_alerts: boolean
-  created_at?: string
-  updated_at?: string
 }
 
 class BudgetAnalytics {
@@ -71,12 +74,15 @@ class BudgetAnalytics {
 
       // Calculate current period spending
       const currentMonthlySpending = this.calculateMonthlySpending(subscriptions || [])
-      
-      // Calculate insights
-      const insights = this.generateInsights(budgetProfile, subscriptions || [], currentMonthlySpending)
-      
-      return insights
 
+      // Calculate insights
+      const insights = this.generateInsights(
+        budgetProfile,
+        subscriptions || [],
+        currentMonthlySpending
+      )
+
+      return insights
     } catch (error) {
       console.error('Error calculating budget insights:', error)
       return null
@@ -84,7 +90,7 @@ class BudgetAnalytics {
   }
 
   // Calculate monthly spending from subscriptions
-  private calculateMonthlySpending(subscriptions: any[]): number {
+  private calculateMonthlySpending(subscriptions: Subscription[]): number {
     return subscriptions.reduce((total, sub) => {
       const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
       return total + monthlyAmount
@@ -93,8 +99,8 @@ class BudgetAnalytics {
 
   // Generate comprehensive insights
   private generateInsights(
-    budgetProfile: BudgetProfile, 
-    subscriptions: any[], 
+    budgetProfile: BudgetProfile,
+    subscriptions: Subscription[],
     currentSpending: number
   ): BudgetInsights {
     const { discretionary_budget, monthly_income, savings_target, fixed_costs } = budgetProfile
@@ -102,7 +108,7 @@ class BudgetAnalytics {
     // Calculate projections
     const projectedMonthlySpending = currentSpending
     const remainingBudget = discretionary_budget - currentSpending
-    
+
     // Calculate daily safe spend
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
@@ -112,9 +118,8 @@ class BudgetAnalytics {
 
     // Calculate days until overbudget
     const dailyBurnRate = currentSpending / 30 // Approximate daily rate
-    const daysUntilOverbudget = dailyBurnRate > 0 
-      ? Math.floor(remainingBudget / dailyBurnRate)
-      : Infinity
+    const daysUntilOverbudget =
+      dailyBurnRate > 0 ? Math.floor(remainingBudget / dailyBurnRate) : Infinity
 
     // Check if savings are on track
     const totalSpending = fixed_costs + currentSpending
@@ -126,7 +131,11 @@ class BudgetAnalytics {
 
     // Determine risk level
     const budgetUsagePercentage = (currentSpending / discretionary_budget) * 100
-    const riskLevel = this.determineRiskLevel(budgetUsagePercentage, savingsOnTrack, daysUntilOverbudget)
+    const riskLevel = this.determineRiskLevel(
+      budgetUsagePercentage,
+      savingsOnTrack,
+      daysUntilOverbudget
+    )
 
     // Generate recommendations
     const recommendations = this.generateRecommendations(
@@ -146,14 +155,17 @@ class BudgetAnalytics {
       daysUntilOverbudget: isFinite(daysUntilOverbudget) ? daysUntilOverbudget : 999,
       categoryBreakdown,
       recommendations,
-      riskLevel
+      riskLevel,
     }
   }
 
   // Calculate category breakdown with trends
-  private calculateCategoryBreakdown(subscriptions: any[], totalBudget: number): BudgetInsights['categoryBreakdown'] {
+  private calculateCategoryBreakdown(
+    subscriptions: Subscription[],
+    totalBudget: number
+  ): BudgetInsights['categoryBreakdown'] {
     const categorySpending: { [key: string]: number } = {}
-    
+
     // Calculate current spending by category
     subscriptions.forEach(sub => {
       const category = sub.category || 'Other'
@@ -167,7 +179,7 @@ class BudgetAnalytics {
         category,
         amount,
         percentage: (amount / totalBudget) * 100,
-        trend: 'stable' as 'up' | 'down' | 'stable' // Would need historical data for real trends
+        trend: 'stable' as 'up' | 'down' | 'stable', // Would need historical data for real trends
       }))
       .sort((a, b) => b.amount - a.amount)
 
@@ -202,43 +214,62 @@ class BudgetAnalytics {
 
     // Budget usage recommendations
     if (budgetUsagePercentage > 100) {
-      recommendations.push('🚨 You\'ve exceeded your discretionary budget. Consider cancelling unused subscriptions immediately.')
+      recommendations.push(
+        "🚨 You've exceeded your discretionary budget. Consider cancelling unused subscriptions immediately."
+      )
     } else if (budgetUsagePercentage > 85) {
-      recommendations.push('⚠️ You\'re close to your budget limit. Review your subscriptions to avoid overspending.')
+      recommendations.push(
+        "⚠️ You're close to your budget limit. Review your subscriptions to avoid overspending."
+      )
     } else if (budgetUsagePercentage < 50) {
-      recommendations.push('✅ Great budget control! You have room for additional services if needed.')
+      recommendations.push(
+        '✅ Great budget control! You have room for additional services if needed.'
+      )
     }
 
     // Savings recommendations
     if (!savingsOnTrack) {
-      const shortfall = budgetProfile.savings_target - (budgetProfile.monthly_income - budgetProfile.fixed_costs - currentSpending)
-      recommendations.push(`💰 You're ${this.formatCurrency(shortfall)} short of your savings goal. Consider reducing subscription spending.`)
+      const shortfall =
+        budgetProfile.savings_target -
+        (budgetProfile.monthly_income - budgetProfile.fixed_costs - currentSpending)
+      recommendations.push(
+        `💰 You're ${this.formatCurrency(shortfall)} short of your savings goal. Consider reducing subscription spending.`
+      )
     }
 
     // Category-specific recommendations
     if (categoryBreakdown.length > 0) {
       const topCategory = categoryBreakdown[0]
       if (topCategory.percentage > 40) {
-        recommendations.push(`📊 ${topCategory.category} accounts for ${topCategory.percentage.toFixed(0)}% of your budget. Consider consolidating services in this category.`)
+        recommendations.push(
+          `📊 ${topCategory.category} accounts for ${topCategory.percentage.toFixed(0)}% of your budget. Consider consolidating services in this category.`
+        )
       }
     }
 
     // High-risk specific recommendations
     if (riskLevel === 'high') {
-      recommendations.push('🎯 Priority: Focus on your top 3 most essential subscriptions and cancel the rest temporarily.')
+      recommendations.push(
+        '🎯 Priority: Focus on your top 3 most essential subscriptions and cancel the rest temporarily.'
+      )
     }
 
     // Income optimization recommendations
-    const remainingAfterEssentials = budgetProfile.monthly_income - budgetProfile.fixed_costs - budgetProfile.savings_target
+    const remainingAfterEssentials =
+      budgetProfile.monthly_income - budgetProfile.fixed_costs - budgetProfile.savings_target
     if (currentSpending > remainingAfterEssentials) {
-      recommendations.push('💡 Consider increasing your income or adjusting your savings target to accommodate your subscription lifestyle.')
+      recommendations.push(
+        '💡 Consider increasing your income or adjusting your savings target to accommodate your subscription lifestyle.'
+      )
     }
 
     return recommendations.slice(0, 4) // Limit to 4 recommendations
   }
 
   // Create or update budget profile with validation
-  async saveBudgetProfile(budgetData: Omit<BudgetProfile, 'id' | 'created_at' | 'updated_at'>): Promise<BudgetProfile | null> {
+  async saveBudgetProfile(
+    budgetData: Omit<BudgetProfile, 'id' | 'created_at' | 'updated_at'>
+  ): Promise<BudgetProfile | null> {
     try {
       // Validate budget data
       const validation = this.validateBudgetProfile(budgetData)
@@ -260,7 +291,7 @@ class BudgetAnalytics {
           .from('budget_profiles')
           .update({
             ...budgetData,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           })
           .eq('user_id', budgetData.user_id)
           .select()
@@ -291,7 +322,9 @@ class BudgetAnalytics {
   }
 
   // Validate budget profile data
-  private validateBudgetProfile(budgetData: Omit<BudgetProfile, 'id' | 'created_at' | 'updated_at'>): {
+  private validateBudgetProfile(
+    budgetData: Omit<BudgetProfile, 'id' | 'created_at' | 'updated_at'>
+  ): {
     isValid: boolean
     errors: string[]
   } {
@@ -305,7 +338,8 @@ class BudgetAnalytics {
     if (budgetData.discretionary_budget < 0) errors.push('Discretionary budget cannot be negative')
 
     // Logical validations
-    const totalAllocated = budgetData.fixed_costs + budgetData.savings_target + budgetData.discretionary_budget
+    const totalAllocated =
+      budgetData.fixed_costs + budgetData.savings_target + budgetData.discretionary_budget
     if (totalAllocated > budgetData.monthly_income) {
       errors.push('Total allocated budget exceeds monthly income')
     }
@@ -318,7 +352,7 @@ class BudgetAnalytics {
 
     return {
       isValid: errors.length === 0,
-      errors
+      errors,
     }
   }
 
@@ -330,18 +364,18 @@ class BudgetAnalytics {
     nextAction: string
   }> {
     const insights = await this.calculateBudgetInsights(userId)
-    
+
     if (!insights) {
       return {
         hasProfile: false,
         budgetUsage: 0,
         riskLevel: 'low',
-        nextAction: 'Set up your budget profile to track spending'
+        nextAction: 'Set up your budget profile to track spending',
       }
     }
 
     const budgetUsage = (insights.currentPeriodSpending / insights.projectedMonthlySpending) * 100
-    
+
     let nextAction = 'Your budget is on track'
     if (insights.riskLevel === 'high') {
       nextAction = 'Review and reduce subscriptions immediately'
@@ -355,22 +389,22 @@ class BudgetAnalytics {
       hasProfile: true,
       budgetUsage,
       riskLevel: insights.riskLevel,
-      nextAction
+      nextAction,
     }
   }
 
   // Helper method to format currency
   private formatCurrency(amount: number, currency: string = 'USD'): string {
     const currencyLocales: { [key: string]: string } = {
-      'USD': 'en-US',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-      'INR': 'en-IN'
+      USD: 'en-US',
+      EUR: 'de-DE',
+      GBP: 'en-GB',
+      INR: 'en-IN',
     }
-    
+
     return new Intl.NumberFormat(currencyLocales[currency] || 'en-US', {
       style: 'currency',
-      currency: currency
+      currency: currency,
     }).format(amount)
   }
 }

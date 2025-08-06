@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   email TEXT,
   gmail_sync_enabled BOOLEAN DEFAULT false,
   gmail_access_token TEXT,
+  gmail_refresh_token TEXT,
   preferred_currency TEXT DEFAULT 'USD',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -16,6 +17,11 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- Enable RLS on profiles
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist, then create new ones
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
 
 -- Users can only see and update their own profile
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
@@ -43,6 +49,12 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 -- Enable RLS on subscriptions
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist, then create new ones
+DROP POLICY IF EXISTS "Users can view own subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Users can insert own subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Users can update own subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Users can delete own subscriptions" ON subscriptions;
+
 -- Users can only see and manage their own subscriptions
 CREATE POLICY "Users can view own subscriptions" ON subscriptions FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own subscriptions" ON subscriptions FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -66,6 +78,12 @@ CREATE TABLE IF NOT EXISTS budget_profiles (
 -- Enable RLS on budget_profiles
 ALTER TABLE budget_profiles ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist, then create new ones
+DROP POLICY IF EXISTS "Users can view own budget" ON budget_profiles;
+DROP POLICY IF EXISTS "Users can insert own budget" ON budget_profiles;
+DROP POLICY IF EXISTS "Users can update own budget" ON budget_profiles;
+DROP POLICY IF EXISTS "Users can delete own budget" ON budget_profiles;
+
 -- Users can only see and manage their own budget
 CREATE POLICY "Users can view own budget" ON budget_profiles FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own budget" ON budget_profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -82,6 +100,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Drop existing trigger if it exists, then create new one
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
 -- Trigger to create profile when user signs up
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -95,6 +116,11 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Drop existing triggers if they exist, then create new ones
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON subscriptions;
+DROP TRIGGER IF EXISTS update_budget_profiles_updated_at ON budget_profiles;
 
 -- Triggers to automatically update updated_at
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

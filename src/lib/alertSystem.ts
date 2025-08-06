@@ -53,10 +53,13 @@ class AlertSystem {
     this.checkBudgetAlerts()
 
     // Set up recurring checks every hour
-    this.alertCheckInterval = setInterval(() => {
-      this.checkTrialAlerts()
-      this.checkBudgetAlerts()
-    }, 60 * 60 * 1000) // 1 hour
+    this.alertCheckInterval = setInterval(
+      () => {
+        this.checkTrialAlerts()
+        this.checkBudgetAlerts()
+      },
+      60 * 60 * 1000
+    ) // 1 hour
   }
 
   // Stop alert monitoring
@@ -70,7 +73,9 @@ class AlertSystem {
   // Check for trial alerts
   async checkTrialAlerts() {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) return
 
       // Get all active trials
@@ -127,7 +132,7 @@ class AlertSystem {
               amount: subscription.amount,
               currency: subscription.currency,
               alert_type: alertType,
-              acknowledged: false
+              acknowledged: false,
             }
 
             alerts.push(alert as TrialAlert)
@@ -139,7 +144,6 @@ class AlertSystem {
       for (const alert of alerts) {
         await this.sendTrialAlert(alert)
       }
-
     } catch (error) {
       console.error('Error checking trial alerts:', error)
     }
@@ -149,12 +153,10 @@ class AlertSystem {
   private async sendTrialAlert(alert: Omit<TrialAlert, 'id' | 'created_at'>) {
     try {
       // Store alert in database
-      const { error } = await supabase
-        .from('trial_alerts')
-        .insert({
-          ...alert,
-          sent_at: new Date().toISOString()
-        })
+      const { error } = await supabase.from('trial_alerts').insert({
+        ...alert,
+        sent_at: new Date().toISOString(),
+      })
 
       if (error) {
         console.error('Error storing trial alert:', error)
@@ -165,7 +167,6 @@ class AlertSystem {
       await this.showTrialNotification(alert)
 
       console.log(`Trial alert sent for ${alert.service_name}: ${alert.alert_type}`)
-
     } catch (error) {
       console.error('Error sending trial alert:', error)
     }
@@ -178,14 +179,14 @@ class AlertSystem {
         '7-day': `${alert.service_name} trial ends in 7 days`,
         '3-day': `⚠️ ${alert.service_name} trial ends in 3 days!`,
         '1-day': `🚨 ${alert.service_name} trial ends tomorrow!`,
-        'expired': `💳 ${alert.service_name} trial has expired - charges may apply`
+        expired: `💳 ${alert.service_name} trial has expired - charges may apply`,
       }
 
       const bodies = {
         '7-day': `Your ${alert.service_name} trial will end soon. Decide if you want to continue or cancel.`,
         '3-day': `Only 3 days left! Will charge ${this.formatCurrency(alert.amount, alert.currency)} if not cancelled.`,
         '1-day': `Last chance! Trial ends tomorrow and will charge ${this.formatCurrency(alert.amount, alert.currency)}.`,
-        'expired': `Your trial has ended. Check if charges have been applied to your account.`
+        expired: `Your trial has ended. Check if charges have been applied to your account.`,
       }
 
       new Notification(messages[alert.alert_type], {
@@ -193,7 +194,7 @@ class AlertSystem {
         icon: '/favicon.ico',
         badge: '/favicon.ico',
         tag: `trial-${alert.subscription_id}`,
-        requireInteraction: alert.alert_type === '1-day' || alert.alert_type === 'expired'
+        requireInteraction: alert.alert_type === '1-day' || alert.alert_type === 'expired',
       })
     }
   }
@@ -201,7 +202,9 @@ class AlertSystem {
   // Check for budget alerts
   async checkBudgetAlerts() {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) return
 
       // Get budget profile
@@ -256,11 +259,10 @@ class AlertSystem {
             current_spending: currentSpending,
             budget_limit: budgetProfile.discretionary_budget,
             percentage_used: percentageUsed,
-            acknowledged: false
+            acknowledged: false,
           } as Omit<BudgetAlert, 'id' | 'created_at'>)
         }
       }
-
     } catch (error) {
       console.error('Error checking budget alerts:', error)
     }
@@ -270,12 +272,10 @@ class AlertSystem {
   private async sendBudgetAlert(alert: Omit<BudgetAlert, 'id' | 'created_at'>) {
     try {
       // Store alert in database
-      const { error } = await supabase
-        .from('budget_alerts')
-        .insert({
-          ...alert,
-          sent_at: new Date().toISOString()
-        })
+      const { error } = await supabase.from('budget_alerts').insert({
+        ...alert,
+        sent_at: new Date().toISOString(),
+      })
 
       if (error) {
         console.error('Error storing budget alert:', error)
@@ -286,7 +286,6 @@ class AlertSystem {
       await this.showBudgetNotification(alert)
 
       console.log(`Budget alert sent: ${alert.alert_type}`)
-
     } catch (error) {
       console.error('Error sending budget alert:', error)
     }
@@ -296,15 +295,15 @@ class AlertSystem {
   private async showBudgetNotification(alert: Omit<BudgetAlert, 'id' | 'created_at'>) {
     if ('Notification' in window && Notification.permission === 'granted') {
       const messages = {
-        'approaching_limit': '⚠️ Budget Alert: Approaching Limit',
-        'exceeded_limit': '🚨 Budget Alert: Limit Exceeded!',
-        'weekly_summary': '📊 Weekly Spending Summary'
+        approaching_limit: '⚠️ Budget Alert: Approaching Limit',
+        exceeded_limit: '🚨 Budget Alert: Limit Exceeded!',
+        weekly_summary: '📊 Weekly Spending Summary',
       }
 
       const bodies = {
-        'approaching_limit': `You've used ${Math.round(alert.percentage_used)}% of your monthly budget (${this.formatCurrency(alert.current_spending)} of ${this.formatCurrency(alert.budget_limit)})`,
-        'exceeded_limit': `You've exceeded your monthly budget! Current spending: ${this.formatCurrency(alert.current_spending)} (${Math.round(alert.percentage_used)}%)`,
-        'weekly_summary': `This week's subscription spending summary is ready to view.`
+        approaching_limit: `You've used ${Math.round(alert.percentage_used)}% of your monthly budget (${this.formatCurrency(alert.current_spending)} of ${this.formatCurrency(alert.budget_limit)})`,
+        exceeded_limit: `You've exceeded your monthly budget! Current spending: ${this.formatCurrency(alert.current_spending)} (${Math.round(alert.percentage_used)}%)`,
+        weekly_summary: `This week's subscription spending summary is ready to view.`,
       }
 
       new Notification(messages[alert.alert_type], {
@@ -312,7 +311,7 @@ class AlertSystem {
         icon: '/favicon.ico',
         badge: '/favicon.ico',
         tag: `budget-${alert.alert_type}`,
-        requireInteraction: alert.alert_type === 'exceeded_limit'
+        requireInteraction: alert.alert_type === 'exceeded_limit',
       })
     }
   }
@@ -335,18 +334,15 @@ class AlertSystem {
 
     return {
       trialAlerts: trialAlerts || [],
-      budgetAlerts: budgetAlerts || []
+      budgetAlerts: budgetAlerts || [],
     }
   }
 
   // Acknowledge alert
   async acknowledgeAlert(alertId: string, type: 'trial' | 'budget') {
     const table = type === 'trial' ? 'trial_alerts' : 'budget_alerts'
-    
-    const { error } = await supabase
-      .from(table)
-      .update({ acknowledged: true })
-      .eq('id', alertId)
+
+    const { error } = await supabase.from(table).update({ acknowledged: true }).eq('id', alertId)
 
     if (error) {
       console.error(`Error acknowledging ${type} alert:`, error)
@@ -375,15 +371,15 @@ class AlertSystem {
   // Helper method to format currency
   private formatCurrency(amount: number, currency: string = 'USD'): string {
     const currencyLocales: { [key: string]: string } = {
-      'USD': 'en-US',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-      'INR': 'en-IN'
+      USD: 'en-US',
+      EUR: 'de-DE',
+      GBP: 'en-GB',
+      INR: 'en-IN',
     }
-    
+
     return new Intl.NumberFormat(currencyLocales[currency] || 'en-US', {
       style: 'currency',
-      currency: currency
+      currency: currency,
     }).format(amount)
   }
 }

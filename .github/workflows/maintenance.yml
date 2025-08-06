@@ -1,0 +1,276 @@
+name: Maintenance & Security
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch: # Allow manual execution
+  push:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # Dependency audit and security scan
+  security-audit:
+    name: 🔒 Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Run npm audit
+        run: |
+          echo "🔍 Running npm security audit..."
+          npm audit --audit-level=moderate || {
+            echo "⚠️ Found security vulnerabilities!"
+            npm audit --audit-level=moderate --json > audit-results.json
+            cat audit-results.json
+            exit 1
+          }
+
+      - name: 📊 Generate security report
+        if: failure()
+        run: |
+          echo "📊 Generating security report..."
+          npm audit --audit-level=low --json | jq '.' > security-report.json
+
+      - name: 📤 Upload security report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report.json
+          retention-days: 30
+
+  # Check for outdated dependencies
+  dependency-check:
+    name: 📦 Dependency Updates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Check for outdated packages
+        run: |
+          echo "🔍 Checking for outdated dependencies..."
+          npm outdated || true
+
+      - name: 📊 Generate dependency report
+        run: |
+          echo "📊 Generating dependency update report..."
+          npm outdated --json > outdated-deps.json || true
+          cat outdated-deps.json || echo "No outdated dependencies found"
+
+      - name: 📤 Upload dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-report
+          path: outdated-deps.json
+          retention-days: 30
+
+  # CodeQL security analysis
+  codeql-analysis:
+    name: 🔍 CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: 🏗️ Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 🔍 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # License compliance check
+  license-check:
+    name: 📄 License Compliance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 📥 Install license checker
+        run: npm install -g license-checker
+
+      - name: 📄 Check licenses
+        run: |
+          echo "📄 Checking package licenses..."
+          license-checker --summary
+          license-checker --json > licenses.json
+
+      - name: 📊 Validate license compatibility
+        run: |
+          echo "📊 Validating license compatibility..."
+          # Check for problematic licenses
+          if license-checker --failOn 'GPL;AGPL;LGPL;CPAL;OSL;EPL;MPL' --summary; then
+            echo "✅ No problematic licenses found"
+          else
+            echo "⚠️ Found potentially problematic licenses"
+            exit 1
+          fi
+
+      - name: 📤 Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: licenses.json
+          retention-days: 30
+
+  # Bundle size analysis
+  bundle-analysis:
+    name: 📊 Bundle Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Build application
+        run: npm run build
+        env:
+          # Use placeholder values for analysis
+          VITE_SUPABASE_URL: 'https://placeholder.supabase.co'
+          VITE_SUPABASE_ANON_KEY: 'placeholder-key'
+
+      - name: 📊 Analyze bundle size
+        run: |
+          echo "📊 Analyzing bundle size..."
+          du -sh dist/
+          find dist -name "*.js" -exec ls -lh {} \; | sort -k5 -hr
+
+      - name: 📈 Bundle size report
+        run: |
+          echo "📈 Generating bundle size report..."
+          TOTAL_SIZE=$(du -sb dist/ | cut -f1)
+          TOTAL_SIZE_MB=$(echo "scale=2; $TOTAL_SIZE / 1024 / 1024" | bc)
+          echo "Total bundle size: ${TOTAL_SIZE_MB} MB"
+
+          # Create simple report
+          echo "# Bundle Size Report" > bundle-report.md
+          echo "- **Total Size**: ${TOTAL_SIZE_MB} MB" >> bundle-report.md
+          echo "- **Generated**: $(date)" >> bundle-report.md
+          echo "" >> bundle-report.md
+          echo "## File Breakdown:" >> bundle-report.md
+          find dist -name "*.js" -exec ls -lh {} \; | sort -k5 -hr | head -10 >> bundle-report.md
+
+      - name: 📤 Upload bundle report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-report
+          path: bundle-report.md
+          retention-days: 30
+
+  # Create maintenance summary
+  maintenance-summary:
+    name: 📋 Maintenance Summary
+    runs-on: ubuntu-latest
+    needs: [security-audit, dependency-check, license-check, bundle-analysis]
+    if: always()
+
+    steps:
+      - name: 📋 Create maintenance summary
+        run: |
+          echo "📋 Creating maintenance summary..."
+
+          echo "# 🔧 Weekly Maintenance Report" > maintenance-summary.md
+          echo "**Generated**: $(date)" >> maintenance-summary.md
+          echo "" >> maintenance-summary.md
+
+          echo "## 🔒 Security Status" >> maintenance-summary.md
+          if [ "${{ needs.security-audit.result }}" == "success" ]; then
+            echo "✅ Security audit passed - no vulnerabilities found" >> maintenance-summary.md
+          else
+            echo "⚠️ Security audit found issues - review required" >> maintenance-summary.md
+          fi
+          echo "" >> maintenance-summary.md
+
+          echo "## 📦 Dependencies" >> maintenance-summary.md
+          if [ "${{ needs.dependency-check.result }}" == "success" ]; then
+            echo "✅ Dependency check completed" >> maintenance-summary.md
+          else
+            echo "⚠️ Dependency check found issues" >> maintenance-summary.md
+          fi
+          echo "" >> maintenance-summary.md
+
+          echo "## 📄 License Compliance" >> maintenance-summary.md
+          if [ "${{ needs.license-check.result }}" == "success" ]; then
+            echo "✅ All licenses are compliant" >> maintenance-summary.md
+          else
+            echo "⚠️ License compliance issues found" >> maintenance-summary.md
+          fi
+          echo "" >> maintenance-summary.md
+
+          echo "## 📊 Bundle Analysis" >> maintenance-summary.md
+          if [ "${{ needs.bundle-analysis.result }}" == "success" ]; then
+            echo "✅ Bundle analysis completed successfully" >> maintenance-summary.md
+          else
+            echo "⚠️ Bundle analysis encountered issues" >> maintenance-summary.md
+          fi
+
+          cat maintenance-summary.md
+
+      - name: 📤 Upload maintenance summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: maintenance-summary
+          path: maintenance-summary.md
+          retention-days: 90

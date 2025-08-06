@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { performLogout } from '../lib/logout'
 import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
 import { alertSystem, TrialAlert, BudgetAlert } from '../lib/alertSystem'
 import { weeklyDigestSystem, WeeklyDigest } from '../lib/weeklyDigest'
 import { budgetAnalytics, BudgetInsights } from '../lib/budgetAnalytics'
+import type { User, UserMetadata } from '../types'
 
 interface Subscription {
   id: string
@@ -33,37 +35,35 @@ interface ExchangeRates {
   [key: string]: number
 }
 
-interface UserMetadata {
-  gmail_connected?: boolean
-  preferred_currency?: string
-}
-
 type Currency = 'USD' | 'EUR' | 'GBP' | 'INR'
 
 // Static exchange rates (in practice, fetch from API)
 const EXCHANGE_RATES: ExchangeRates = {
-  'USD_EUR': 0.91,
-  'USD_GBP': 0.79,
-  'USD_INR': 83.25,
-  'EUR_USD': 1.10,
-  'EUR_GBP': 0.87,
-  'EUR_INR': 91.52,
-  'GBP_USD': 1.27,
-  'GBP_EUR': 1.15,
-  'GBP_INR': 105.72,
-  'INR_USD': 0.012,
-  'INR_EUR': 0.011,
-  'INR_GBP': 0.0095,
+  USD_EUR: 0.91,
+  USD_GBP: 0.79,
+  USD_INR: 83.25,
+  EUR_USD: 1.1,
+  EUR_GBP: 0.87,
+  EUR_INR: 91.52,
+  GBP_USD: 1.27,
+  GBP_EUR: 1.15,
+  GBP_INR: 105.72,
+  INR_USD: 0.012,
+  INR_EUR: 0.011,
+  INR_GBP: 0.0095,
 }
 
 export default function Dashboard() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [budgetProfile, setBudgetProfile] = useState<BudgetProfile | null>(null)
   const [loading, setLoading] = useState(false)
-  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
+  const [_userMetadata, setUserMetadata] = useState<UserMetadata | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
+  const [_budgetInsights, setBudgetInsights] = useState<BudgetInsights | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>('USD')
-  const [_userMetadata, setUserMetadata] = useState<UserMetadata>({})
   const [showGmailModal, setShowGmailModal] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -77,7 +77,6 @@ export default function Dashboard() {
     budgetAlerts: BudgetAlert[]
   }>({ trialAlerts: [], budgetAlerts: [] })
   const [showAlertBanner, setShowAlertBanner] = useState(false)
-  const [_budgetInsights, setBudgetInsights] = useState<BudgetInsights | null>(null)
   const [weeklyDigestSummary, setWeeklyDigestSummary] = useState<{
     hasUnviewedDigest: boolean
     latestDigest: WeeklyDigest | null
@@ -106,9 +105,11 @@ export default function Dashboard() {
   }, [])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     setCurrentUser(user)
-    
+
     if (user?.user_metadata) {
       setUserMetadata(user.user_metadata)
       if (!user.user_metadata.gmail_connected) {
@@ -124,7 +125,9 @@ export default function Dashboard() {
   }
 
   const loadUserPreferences = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (user?.user_metadata?.preferred_currency) {
       setSelectedCurrency(user.user_metadata.preferred_currency)
     }
@@ -133,8 +136,10 @@ export default function Dashboard() {
   const loadBudgetProfile = async () => {
     try {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
       if (user) {
         const { data, error } = await supabase
           .from('budget_profiles')
@@ -180,7 +185,7 @@ export default function Dashboard() {
         next_charge_date: sub.next_billing,
         status: sub.status,
         category: sub.category || 'Other',
-        created_at: sub.created_at
+        created_at: sub.created_at,
       }))
 
       setSubscriptions(formattedSubscriptions)
@@ -193,31 +198,33 @@ export default function Dashboard() {
   const initializeAlertSystem = async () => {
     // Request notification permission
     await alertSystem.requestNotificationPermission()
-    
+
     // Initialize alert monitoring
     alertSystem.initialize()
-    
+
     // Initialize weekly digest system
     weeklyDigestSystem.initialize()
-    
+
     // Load pending alerts
     await loadPendingAlerts()
-    
+
     // Load budget insights
     await loadBudgetInsights()
-    
+
     // Load weekly digest summary
     await loadWeeklyDigestSummary()
   }
 
   const loadPendingAlerts = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) return
 
       const alerts = await alertSystem.getPendingAlerts(user.id)
       setPendingAlerts(alerts)
-      
+
       // Show alert banner if there are pending alerts
       const totalAlerts = alerts.trialAlerts.length + alerts.budgetAlerts.length
       setShowAlertBanner(totalAlerts > 0)
@@ -237,7 +244,9 @@ export default function Dashboard() {
 
   const loadBudgetInsights = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) return
 
       const insights = await budgetAnalytics.calculateBudgetInsights(user.id)
@@ -249,7 +258,9 @@ export default function Dashboard() {
 
   const loadWeeklyDigestSummary = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) return
 
       const summary = await weeklyDigestSystem.getDigestSummary(user.id)
@@ -261,7 +272,7 @@ export default function Dashboard() {
 
   const convertCurrency = (amount: number, fromCurrency: string, toCurrency: string): number => {
     if (fromCurrency === toCurrency) return amount
-    
+
     const rate = EXCHANGE_RATES[`${fromCurrency}_${toCurrency}`]
     return rate ? amount * rate : amount
   }
@@ -270,21 +281,23 @@ export default function Dashboard() {
     if (originalCurrency === selectedCurrency) {
       return formatCurrency(amount)
     }
-    
+
     const convertedAmount = convertCurrency(amount, originalCurrency, selectedCurrency)
     const originalFormatted = formatCurrency(amount, originalCurrency)
     const convertedFormatted = formatCurrency(convertedAmount, selectedCurrency)
-    
+
     return `${originalFormatted} → ${convertedFormatted}`
   }
 
   const updateCurrencyPreference = async (currency: Currency) => {
     setSelectedCurrency(currency)
-    
-    const { data: { user } } = await supabase.auth.getUser()
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (user) {
       await supabase.auth.updateUser({
-        data: { preferred_currency: currency }
+        data: { preferred_currency: currency },
       })
     }
   }
@@ -298,19 +311,19 @@ export default function Dashboard() {
       // 2. Get authorization code
       // 3. Exchange for access token
       // 4. Store token securely
-      
+
       const mockAccessToken = 'mock-gmail-access-token-' + Date.now()
-      
+
       // Store the access token in the user's profile
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (user) {
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: user.id,
-            gmail_access_token: mockAccessToken,
-            updated_at: new Date().toISOString()
-          })
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: user.id,
+          gmail_access_token: mockAccessToken,
+          updated_at: new Date().toISOString(),
+        })
 
         if (profileError) {
           console.error('Error storing Gmail token:', profileError)
@@ -320,23 +333,24 @@ export default function Dashboard() {
 
         // Update user metadata
         await supabase.auth.updateUser({
-          data: { gmail_connected: true }
+          data: { gmail_connected: true },
         })
         setUserMetadata(prev => ({ ...prev, gmail_connected: true }))
       }
-      
+
       setShowGmailModal(false)
       setIsScanning(true)
-      
+
       // Simulate Gmail scanning with the stored token
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions(mockAccessToken)
-      
+      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions()
+
       console.log('Parsed trials from Gmail:', parsedTrials)
-      
+
       // Show success message with found trials
       const foundTrials = parsedTrials.length
-      alert(`Gmail connected successfully! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your inbox.`)
-      
+      alert(
+        `Gmail connected successfully! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your inbox.`
+      )
     } catch (error) {
       console.error('Gmail connection error:', error)
       alert('Failed to connect Gmail')
@@ -355,10 +369,13 @@ export default function Dashboard() {
       setShowTrialConversionModal(true)
     } else if (action === 'cancel') {
       // Open external cancellation link or support email
-      const supportEmail = 'support@' + trial.service_name.toLowerCase().replace(/\s+/g, '') + '.com'
+      const supportEmail =
+        'support@' + trial.service_name.toLowerCase().replace(/\s+/g, '') + '.com'
       const cancellationUrl = `https://${trial.service_name.toLowerCase().replace(/\s+/g, '')}.com/cancel`
-      
-      const confirmed = confirm(`Are you sure you want to cancel your ${trial.service_name} trial?\n\nClick OK to visit the cancellation page, or contact support at ${supportEmail}`)
+
+      const confirmed = confirm(
+        `Are you sure you want to cancel your ${trial.service_name} trial?\n\nClick OK to visit the cancellation page, or contact support at ${supportEmail}`
+      )
       if (confirmed) {
         // Try to open the cancellation URL, fallback to email
         window.open(cancellationUrl, '_blank')
@@ -372,34 +389,35 @@ export default function Dashboard() {
       id: Date.now().toString(), // Generate new ID
       status: 'active',
       trial_end_date: undefined, // Remove trial end date
-      next_charge_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Set next charge to 30 days from now
+      next_charge_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Set next charge to 30 days from now
     }
 
     // Add to subscriptions and remove from trials
     setSubscriptions(prev => [
       ...prev.filter(sub => sub.id !== convertingTrial?.id), // Remove the trial
-      newSubscription // Add as active subscription
+      newSubscription, // Add as active subscription
     ])
 
     // Close modal and reset state
     setShowTrialConversionModal(false)
     setConvertingTrial(null)
-    
+
     alert(`Successfully started ${newSubscription.service_name} subscription!`)
   }
 
   const handleGmailScan = async () => {
     setIsScanning(true)
-    
+
     try {
-      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions('mock-access-token')
-      
+      const parsedTrials: ParsedTrialEmail[] = await gmailIntegration.fetchAndParseSubscriptions()
+
       console.log('Parsed trials from Gmail:', parsedTrials)
-      
+
       // Show success message with found trials
       const foundTrials = parsedTrials.length
-      alert(`Scan complete! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your Gmail.`)
-      
+      alert(
+        `Scan complete! Found ${foundTrials} trial subscription${foundTrials !== 1 ? 's' : ''} in your Gmail.`
+      )
     } catch (error) {
       console.error('Gmail scan error:', error)
       alert('Error scanning Gmail. Please try again.')
@@ -411,7 +429,9 @@ export default function Dashboard() {
   // Subscription Management Functions
   const handleAddSubscription = async (subscriptionData: Omit<Subscription, 'id'>) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (!user) {
         alert('You must be logged in to add subscriptions')
         return
@@ -419,17 +439,17 @@ export default function Dashboard() {
 
       const newSubscription = {
         ...subscriptionData,
-        user_id: user.id
+        user_id: user.id,
       }
-      
+
       const { data, error } = await supabase
         .from('subscriptions')
         .insert(newSubscription)
         .select()
         .single()
-      
+
       if (error) throw error
-      
+
       setSubscriptions(prev => [...prev, data])
       setShowAddModal(false)
       alert('Subscription added successfully!')
@@ -451,14 +471,14 @@ export default function Dashboard() {
           next_charge_date: subscriptionData.next_charge_date,
           category: subscriptionData.category,
           status: subscriptionData.status,
-          trial_end_date: subscriptionData.trial_end_date
+          trial_end_date: subscriptionData.trial_end_date,
         })
         .eq('id', subscriptionData.id)
-      
+
       if (error) throw error
-      
-      setSubscriptions(prev => 
-        prev.map(sub => sub.id === subscriptionData.id ? subscriptionData : sub)
+
+      setSubscriptions(prev =>
+        prev.map(sub => (sub.id === subscriptionData.id ? subscriptionData : sub))
       )
       setShowEditModal(false)
       setEditingSubscription(null)
@@ -471,19 +491,17 @@ export default function Dashboard() {
 
   const handleCancelSubscription = async (subscriptionId: string) => {
     if (!confirm('Are you sure you want to cancel this subscription?')) return
-    
+
     try {
       const { error } = await supabase
         .from('subscriptions')
         .update({ status: 'cancelled' })
         .eq('id', subscriptionId)
-      
+
       if (error) throw error
-      
-      setSubscriptions(prev => 
-        prev.map(sub => 
-          sub.id === subscriptionId ? { ...sub, status: 'cancelled' } : sub
-        )
+
+      setSubscriptions(prev =>
+        prev.map(sub => (sub.id === subscriptionId ? { ...sub, status: 'cancelled' } : sub))
       )
       alert('Subscription cancelled successfully!')
     } catch (error) {
@@ -496,22 +514,22 @@ export default function Dashboard() {
     setEditingSubscription({
       ...subscription,
       id: '', // Clear ID for new subscription
-      service_name: `${subscription.service_name} (Copy)`
+      service_name: `${subscription.service_name} (Copy)`,
     })
     setShowAddModal(true)
   }
 
   const handleDeleteSubscription = async (subscriptionId: string) => {
-    if (!confirm('Are you sure you want to delete this subscription? This action cannot be undone.')) return
-    
+    if (
+      !confirm('Are you sure you want to delete this subscription? This action cannot be undone.')
+    )
+      return
+
     try {
-      const { error } = await supabase
-        .from('subscriptions')
-        .delete()
-        .eq('id', subscriptionId)
-      
+      const { error } = await supabase.from('subscriptions').delete().eq('id', subscriptionId)
+
       if (error) throw error
-      
+
       setSubscriptions(prev => prev.filter(sub => sub.id !== subscriptionId))
       alert('Subscription deleted successfully!')
     } catch (error) {
@@ -537,11 +555,12 @@ export default function Dashboard() {
   const getTrialsEnding = () => {
     const today = new Date()
     const threeDaysFromNow = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000)
-    return subscriptions.filter(sub => 
-      sub.status === 'trial' && 
-      sub.trial_end_date && 
-      new Date(sub.trial_end_date) >= today &&
-      new Date(sub.trial_end_date) <= threeDaysFromNow
+    return subscriptions.filter(
+      sub =>
+        sub.status === 'trial' &&
+        sub.trial_end_date &&
+        new Date(sub.trial_end_date) >= today &&
+        new Date(sub.trial_end_date) <= threeDaysFromNow
     )
   }
 
@@ -572,15 +591,15 @@ export default function Dashboard() {
 
   const formatCurrency = (amount: number, currency: string = selectedCurrency) => {
     const currencyLocales: { [key: string]: string } = {
-      'USD': 'en-US',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-      'INR': 'en-IN'
+      USD: 'en-US',
+      EUR: 'de-DE',
+      GBP: 'en-GB',
+      INR: 'en-IN',
     }
-    
+
     return new Intl.NumberFormat(currencyLocales[currency] || 'en-US', {
       style: 'currency',
-      currency: currency
+      currency: currency,
     }).format(amount)
   }
 
@@ -589,42 +608,46 @@ export default function Dashboard() {
     const activeSubscriptions = subscriptions.length
     const trialsEndingCount = getTrialsEnding().length
     const budgetUsagePercent = getBudgetUsage()
-    
+
     // Get current time for time-based greeting
     const currentHour = new Date().getHours()
-    const timeGreeting = currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening'
-    
+    const timeGreeting =
+      currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening'
+
     // Generate user name from email
     const userName = currentUser?.email?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'Demo User'
-    const displayName = currentUser ? userName.charAt(0).toUpperCase() + userName.slice(1) : 'Demo User'
-    
+    const displayName = currentUser
+      ? userName.charAt(0).toUpperCase() + userName.slice(1)
+      : 'Demo User'
+
     // Generate AI-powered insights
     let insight = ''
     let mood = 'positive' // positive, neutral, warning
-    
+
     if (trialsEndingCount > 0) {
       insight = `You have ${trialsEndingCount} trial${trialsEndingCount > 1 ? 's' : ''} ending soon. `
       mood = 'warning'
       if (trialsEndingCount > 2) {
-        insight += "Time to make some decisions to avoid unexpected charges!"
+        insight += 'Time to make some decisions to avoid unexpected charges!'
       } else {
         insight += "Perfect time to review and decide what's worth keeping."
       }
     } else if (budgetUsagePercent > 85) {
       insight = `You're at ${Math.round(budgetUsagePercent)}% of your monthly budget. `
       mood = 'warning'
-      insight += "Consider reviewing your subscriptions to stay on track."
+      insight += 'Consider reviewing your subscriptions to stay on track.'
     } else if (budgetUsagePercent > 70) {
       insight = `You're at ${Math.round(budgetUsagePercent)}% of your monthly budget. `
       mood = 'neutral'
       insight += "You're doing well but keep an eye on upcoming charges."
     } else if (activeSubscriptions === 0) {
-      insight = "Ready to take control of your subscriptions? Start by adding your current services."
+      insight =
+        'Ready to take control of your subscriptions? Start by adding your current services.'
       mood = 'positive'
     } else if (activeSubscriptions < 5) {
       insight = `You're managing ${activeSubscriptions} subscription${activeSubscriptions > 1 ? 's' : ''} efficiently. `
       mood = 'positive'
-      insight += "Great job keeping things lean!"
+      insight += 'Great job keeping things lean!'
     } else if (activeSubscriptions < 10) {
       insight = `You have ${activeSubscriptions} active subscriptions totaling ${formatCurrency(totalSpend)} monthly. `
       mood = 'neutral'
@@ -634,7 +657,7 @@ export default function Dashboard() {
       mood = 'neutral'
       insight += "That's quite a digital lifestyle - make sure each one adds value."
     }
-    
+
     // Add spending trend insight
     if (totalSpend > 0) {
       const avgPerService = totalSpend / activeSubscriptions
@@ -644,11 +667,11 @@ export default function Dashboard() {
         insight += ` At ${formatCurrency(avgPerService)} average per service, you're great at finding deals!`
       }
     }
-    
+
     return {
       greeting: `${timeGreeting}, ${displayName}! 👋`,
       insight,
-      mood
+      mood,
     }
   }
 
@@ -657,7 +680,7 @@ export default function Dashboard() {
     const today = new Date()
     const diffTime = date.getTime() - today.getTime()
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    
+
     if (diffDays === 0) return 'Today'
     if (diffDays === 1) return 'Tomorrow'
     if (diffDays < 7) return `In ${diffDays} days`
@@ -696,22 +719,27 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center space-x-4">
               {/* Gmail Scan Button */}
-              <button 
+              <button
                 onClick={handleGmailScan}
                 disabled={isScanning}
                 className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
                 </svg>
                 <span>{isScanning ? 'Scanning...' : 'Scan Gmail'}</span>
               </button>
 
               {/* Currency Selector */}
               <div className="relative">
-                <select 
-                  value={selectedCurrency} 
-                  onChange={(e) => updateCurrencyPreference(e.target.value as Currency)}
+                <select
+                  value={selectedCurrency}
+                  onChange={e => updateCurrencyPreference(e.target.value as Currency)}
                   className="appearance-none bg-white border border-gray-300 rounded-md pl-3 pr-8 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="USD">USD ($)</option>
@@ -720,20 +748,40 @@ export default function Dashboard() {
                   <option value="INR">INR (₹)</option>
                 </select>
                 <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <svg
+                    className="w-4 h-4 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
                   </svg>
                 </div>
               </div>
-              
-              <Link 
+
+              <Link
                 to="/settings"
                 className="p-2 text-gray-400 hover:text-gray-600 relative group"
                 title="Settings"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
                 </svg>
                 {/* Tooltip */}
                 <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
@@ -741,13 +789,20 @@ export default function Dashboard() {
                 </div>
               </Link>
 
-              <button 
-                onClick={() => supabase.auth.signOut()}
+              <button
+                onClick={() =>
+                  performLogout({ redirectTo: '/', clearStorage: true, forceReload: false })
+                }
                 className="p-2 text-gray-400 hover:text-red-600 relative group"
                 title="Logout"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
                 </svg>
                 {/* Tooltip */}
                 <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
@@ -766,8 +821,18 @@ export default function Dashboard() {
             <div className="flex items-start justify-between">
               <div className="flex items-center space-x-3">
                 <div className="flex-shrink-0">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 002 2h2a2 2 0 012-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 00-2 2h-2a2 2 0 00-2 2v6a2 2 0 01-2 2H9z" />
+                  <svg
+                    className="w-6 h-6 text-blue-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 002 2h2a2 2 0 012-2V7a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 00-2 2h-2a2 2 0 00-2 2v6a2 2 0 01-2 2H9z"
+                    />
                   </svg>
                 </div>
                 <div className="flex-1">
@@ -775,9 +840,11 @@ export default function Dashboard() {
                     📊 Your Weekly Digest is Ready!
                   </h3>
                   <p className="text-xs text-blue-700 mt-1">
-                    Week of {new Date(weeklyDigestSummary.latestDigest.week_start).toLocaleDateString()} - 
-                    {formatCurrency(weeklyDigestSummary.latestDigest.total_charges)} spent, 
-                    {weeklyDigestSummary.latestDigest.new_subscriptions} new subscription{weeklyDigestSummary.latestDigest.new_subscriptions !== 1 ? 's' : ''}
+                    Week of{' '}
+                    {new Date(weeklyDigestSummary.latestDigest.week_start).toLocaleDateString()} -
+                    {formatCurrency(weeklyDigestSummary.latestDigest.total_charges)} spent,
+                    {weeklyDigestSummary.latestDigest.new_subscriptions} new subscription
+                    {weeklyDigestSummary.latestDigest.new_subscriptions !== 1 ? 's' : ''}
                     {weeklyDigestSummary.weeklyTrend === 'up' && ' 📈 Spending increased'}
                     {weeklyDigestSummary.weeklyTrend === 'down' && ' 📉 Spending decreased'}
                   </p>
@@ -804,108 +871,179 @@ export default function Dashboard() {
         )}
 
         {/* Alert Banner */}
-        {showAlertBanner && (pendingAlerts.trialAlerts.length > 0 || pendingAlerts.budgetAlerts.length > 0) && (
-          <div className="mb-6 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg p-4">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="flex-shrink-0">
-                  <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6l2 2H9V7z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v6h6" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-medium text-orange-800">
-                    You have {pendingAlerts.trialAlerts.length + pendingAlerts.budgetAlerts.length} pending alerts
-                  </h3>
-                  <div className="mt-2 space-y-1">
-                    {pendingAlerts.trialAlerts.slice(0, 2).map((alert) => (
-                      <div key={alert.id} className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1">
-                        <span>
-                          {alert.alert_type === 'expired' ? '🚨' : '⚠️'} {alert.service_name} trial {alert.alert_type === 'expired' ? 'has expired' : `ends in ${alert.alert_type.replace('-day', ' day(s)')}`}
-                        </span>
-                        <button
-                          onClick={() => acknowledgeAlert(alert.id, 'trial')}
-                          className="ml-2 text-orange-600 hover:text-orange-800"
+        {showAlertBanner &&
+          (pendingAlerts.trialAlerts.length > 0 || pendingAlerts.budgetAlerts.length > 0) && (
+            <div className="mb-6 bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0">
+                    <svg
+                      className="w-6 h-6 text-orange-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 17h5l-5 5v-5z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 7h6l2 2H9V7z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 3v6h6"
+                      />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-medium text-orange-800">
+                      You have{' '}
+                      {pendingAlerts.trialAlerts.length + pendingAlerts.budgetAlerts.length} pending
+                      alerts
+                    </h3>
+                    <div className="mt-2 space-y-1">
+                      {pendingAlerts.trialAlerts.slice(0, 2).map(alert => (
+                        <div
+                          key={alert.id}
+                          className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1"
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                    {pendingAlerts.budgetAlerts.slice(0, 2).map((alert) => (
-                      <div key={alert.id} className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1">
-                        <span>
-                          {alert.alert_type === 'exceeded_limit' ? '🚨' : '⚠️'} Budget {alert.alert_type.replace('_', ' ')}: {Math.round(alert.percentage_used)}% used
-                        </span>
-                        <button
-                          onClick={() => acknowledgeAlert(alert.id, 'budget')}
-                          className="ml-2 text-orange-600 hover:text-orange-800"
+                          <span>
+                            {alert.alert_type === 'expired' ? '🚨' : '⚠️'} {alert.service_name}{' '}
+                            trial{' '}
+                            {alert.alert_type === 'expired'
+                              ? 'has expired'
+                              : `ends in ${alert.alert_type.replace('-day', ' day(s)')}`}
+                          </span>
+                          <button
+                            onClick={() => acknowledgeAlert(alert.id, 'trial')}
+                            className="ml-2 text-orange-600 hover:text-orange-800"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      {pendingAlerts.budgetAlerts.slice(0, 2).map(alert => (
+                        <div
+                          key={alert.id}
+                          className="flex items-center justify-between text-xs text-orange-700 bg-orange-100 rounded px-2 py-1"
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                          <span>
+                            {alert.alert_type === 'exceeded_limit' ? '🚨' : '⚠️'} Budget{' '}
+                            {alert.alert_type.replace('_', ' ')}:{' '}
+                            {Math.round(alert.percentage_used)}% used
+                          </span>
+                          <button
+                            onClick={() => acknowledgeAlert(alert.id, 'budget')}
+                            className="ml-2 text-orange-600 hover:text-orange-800"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
+                <button
+                  onClick={() => setShowAlertBanner(false)}
+                  className="flex-shrink-0 ml-4 text-orange-400 hover:text-orange-600"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
               </div>
-              <button
-                onClick={() => setShowAlertBanner(false)}
-                className="flex-shrink-0 ml-4 text-orange-400 hover:text-orange-600"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Welcome Back Section */}
         {(() => {
           const welcomeData = generateWelcomeMessage()
           return (
-            <div className={`mb-6 rounded-lg p-6 ${
-              welcomeData.mood === 'warning' ? 'bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200' :
-              welcomeData.mood === 'neutral' ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200' :
-              'bg-gradient-to-r from-green-50 to-blue-50 border border-green-200'
-            }`}>
+            <div
+              className={`mb-6 rounded-lg p-6 ${
+                welcomeData.mood === 'warning'
+                  ? 'bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200'
+                  : welcomeData.mood === 'neutral'
+                    ? 'bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200'
+                    : 'bg-gradient-to-r from-green-50 to-blue-50 border border-green-200'
+              }`}
+            >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <h2 className={`text-xl font-semibold mb-2 ${
-                    welcomeData.mood === 'warning' ? 'text-orange-800' :
-                    welcomeData.mood === 'neutral' ? 'text-blue-800' :
-                    'text-green-800'
-                  }`}>
+                  <h2
+                    className={`text-xl font-semibold mb-2 ${
+                      welcomeData.mood === 'warning'
+                        ? 'text-orange-800'
+                        : welcomeData.mood === 'neutral'
+                          ? 'text-blue-800'
+                          : 'text-green-800'
+                    }`}
+                  >
                     {welcomeData.greeting}
                   </h2>
-                  <p className={`text-sm leading-relaxed ${
-                    welcomeData.mood === 'warning' ? 'text-orange-700' :
-                    welcomeData.mood === 'neutral' ? 'text-blue-700' :
-                    'text-green-700'
-                  }`}>
+                  <p
+                    className={`text-sm leading-relaxed ${
+                      welcomeData.mood === 'warning'
+                        ? 'text-orange-700'
+                        : welcomeData.mood === 'neutral'
+                          ? 'text-blue-700'
+                          : 'text-green-700'
+                    }`}
+                  >
                     {welcomeData.insight}
                   </p>
                   {/* Quick Stats */}
                   <div className="flex items-center space-x-6 mt-4">
                     <div className="flex items-center space-x-2">
-                      <div className={`w-2 h-2 rounded-full ${
-                        welcomeData.mood === 'warning' ? 'bg-orange-400' :
-                        welcomeData.mood === 'neutral' ? 'bg-blue-400' :
-                        'bg-green-400'
-                      }`}></div>
-                      <span className={`text-xs font-medium ${
-                        welcomeData.mood === 'warning' ? 'text-orange-600' :
-                        welcomeData.mood === 'neutral' ? 'text-blue-600' :
-                        'text-green-600'
-                      }`}>
-                        {subscriptions.length} Active • {formatCurrency(calculateTotalSpend())} Monthly
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          welcomeData.mood === 'warning'
+                            ? 'bg-orange-400'
+                            : welcomeData.mood === 'neutral'
+                              ? 'bg-blue-400'
+                              : 'bg-green-400'
+                        }`}
+                      ></div>
+                      <span
+                        className={`text-xs font-medium ${
+                          welcomeData.mood === 'warning'
+                            ? 'text-orange-600'
+                            : welcomeData.mood === 'neutral'
+                              ? 'text-blue-600'
+                              : 'text-green-600'
+                        }`}
+                      >
+                        {subscriptions.length} Active • {formatCurrency(calculateTotalSpend())}{' '}
+                        Monthly
                       </span>
                     </div>
                     {budgetProfile && (
                       <div className="flex items-center space-x-2">
-                        <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        <svg
+                          className="w-3 h-3 text-gray-500"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                          />
                         </svg>
                         <span className="text-xs text-gray-600">
                           {Math.round(getBudgetUsage())}% of budget used
@@ -914,22 +1052,56 @@ export default function Dashboard() {
                     )}
                   </div>
                 </div>
-                <div className={`ml-4 p-3 rounded-full ${
-                  welcomeData.mood === 'warning' ? 'bg-orange-100' :
-                  welcomeData.mood === 'neutral' ? 'bg-blue-100' :
-                  'bg-green-100'
-                }`}>
+                <div
+                  className={`ml-4 p-3 rounded-full ${
+                    welcomeData.mood === 'warning'
+                      ? 'bg-orange-100'
+                      : welcomeData.mood === 'neutral'
+                        ? 'bg-blue-100'
+                        : 'bg-green-100'
+                  }`}
+                >
                   {welcomeData.mood === 'warning' ? (
-                    <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    <svg
+                      className="w-6 h-6 text-orange-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+                      />
                     </svg>
                   ) : welcomeData.mood === 'neutral' ? (
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg
+                      className="w-6 h-6 text-blue-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
                     </svg>
                   ) : (
-                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg
+                      className="w-6 h-6 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
                     </svg>
                   )}
                 </div>
@@ -944,12 +1116,26 @@ export default function Dashboard() {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-gray-600">Monthly Spend</h3>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+                />
               </svg>
             </div>
-            <div className="text-2xl font-bold text-gray-900">{formatCurrency(calculateTotalSpend())}</div>
-            <p className="text-xs text-gray-500 mt-1">{subscriptions.length} active subscriptions</p>
+            <div className="text-2xl font-bold text-gray-900">
+              {formatCurrency(calculateTotalSpend())}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {subscriptions.length} active subscriptions
+            </p>
           </div>
 
           {/* Budget Usage */}
@@ -957,8 +1143,18 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center space-x-2">
                 <h3 className="text-sm font-medium text-gray-600">Budget Usage</h3>
-                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                <svg
+                  className="w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
                 </svg>
               </div>
             </div>
@@ -966,12 +1162,14 @@ export default function Dashboard() {
               <>
                 <div className="text-2xl font-bold text-gray-900">{Math.round(budgetUsage)}%</div>
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                  <div 
+                  <div
                     className={`h-2 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
                     style={{ width: `${budgetUsage}%` }}
                   ></div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{formatCurrency(budgetProfile.discretionary_budget)} limit</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {formatCurrency(budgetProfile.discretionary_budget)} limit
+                </p>
               </>
             ) : (
               <>
@@ -979,7 +1177,10 @@ export default function Dashboard() {
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
                   <div className="h-2 rounded-full bg-gray-300" style={{ width: '0%' }}></div>
                 </div>
-                <Link to="/budget" className="text-xs text-blue-600 hover:text-blue-800 mt-1 inline-block hover:underline">
+                <Link
+                  to="/budget"
+                  className="text-xs text-blue-600 hover:text-blue-800 mt-1 inline-block hover:underline"
+                >
                   Set up your budget to track usage
                 </Link>
               </>
@@ -990,14 +1191,26 @@ export default function Dashboard() {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-gray-600">Trials Ending</h3>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+                />
               </svg>
             </div>
             <div className="flex items-center space-x-2">
               <div className="text-2xl font-bold text-gray-900">{trialsEnding.length}</div>
               {trialsEnding.length > 0 && (
-                <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">Notion Pro</span>
+                <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">
+                  Notion Pro
+                </span>
               )}
             </div>
             <p className="text-xs text-gray-500 mt-1">Next 7 days</p>
@@ -1007,8 +1220,18 @@ export default function Dashboard() {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-gray-600">Upcoming Charges</h3>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                />
               </svg>
             </div>
             <div className="text-2xl font-bold text-gray-900">{upcomingCharges.length}</div>
@@ -1025,8 +1248,8 @@ export default function Dashboard() {
                 { id: 'overview', name: 'Overview' },
                 { id: 'subscriptions', name: 'Subscriptions' },
                 { id: 'budget', name: 'Budget' },
-                { id: 'upcoming', name: 'Upcoming' }
-              ].map((tab) => (
+                { id: 'upcoming', name: 'Upcoming' },
+              ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -1045,7 +1268,7 @@ export default function Dashboard() {
           {/* Tab Content */}
           <div className="p-6">
             {activeTab === 'overview' && (
-              <OverviewTab 
+              <OverviewTab
                 budgetProfile={budgetProfile}
                 subscriptions={subscriptions}
                 trialsEnding={trialsEnding}
@@ -1058,7 +1281,7 @@ export default function Dashboard() {
               />
             )}
             {activeTab === 'subscriptions' && (
-              <SubscriptionsTab 
+              <SubscriptionsTab
                 subscriptions={subscriptions}
                 formatCurrencyWithConversion={formatCurrencyWithConversion}
                 formatDate={formatDate}
@@ -1072,7 +1295,7 @@ export default function Dashboard() {
               />
             )}
             {activeTab === 'budget' && (
-              <BudgetTab 
+              <BudgetTab
                 budgetProfile={budgetProfile}
                 totalSpend={calculateTotalSpend()}
                 spendingByCategory={spendingByCategory}
@@ -1080,7 +1303,7 @@ export default function Dashboard() {
               />
             )}
             {activeTab === 'upcoming' && (
-              <UpcomingTab 
+              <UpcomingTab
                 upcomingCharges={upcomingCharges}
                 formatCurrency={formatCurrency}
                 formatCurrencyWithConversion={formatCurrencyWithConversion}
@@ -1098,32 +1321,67 @@ export default function Dashboard() {
             <div className="mt-3">
               <div className="flex items-center mb-4">
                 <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  <svg
+                    className="w-6 h-6 text-blue-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
                   </svg>
                 </div>
               </div>
               <div className="text-center">
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Connect Your Gmail</h3>
                 <p className="text-sm text-gray-500 mb-4">
-                  We use limited access to your Gmail to detect billing-related subscriptions and receipts only.
+                  We use limited access to your Gmail to detect billing-related subscriptions and
+                  receipts only.
                 </p>
                 <ul className="text-left text-sm text-gray-600 mb-6 space-y-2">
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-4 h-4 text-green-500 mr-2"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                     Read-only inbox access
                   </li>
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-4 h-4 text-green-500 mr-2"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                     Only scans emails with keywords like "receipt", "invoice", "subscription"
                   </li>
                   <li className="flex items-center">
-                    <svg className="w-4 h-4 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-4 h-4 text-green-500 mr-2"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                     You can disconnect at any time
                   </li>
@@ -1151,7 +1409,7 @@ export default function Dashboard() {
 
       {/* Add Subscription Modal */}
       {showAddModal && (
-        <AddSubscriptionModal 
+        <AddSubscriptionModal
           isOpen={showAddModal}
           onClose={() => {
             setShowAddModal(false)
@@ -1164,7 +1422,7 @@ export default function Dashboard() {
 
       {/* Edit Subscription Modal */}
       {showEditModal && editingSubscription && (
-        <EditSubscriptionModal 
+        <EditSubscriptionModal
           isOpen={showEditModal}
           onClose={() => {
             setShowEditModal(false)
@@ -1177,7 +1435,7 @@ export default function Dashboard() {
 
       {/* Trial Conversion Modal */}
       {showTrialConversionModal && convertingTrial && (
-        <TrialConversionModal 
+        <TrialConversionModal
           isOpen={showTrialConversionModal}
           onClose={() => {
             setShowTrialConversionModal(false)
@@ -1192,42 +1450,54 @@ export default function Dashboard() {
 }
 
 // Tab Components
-function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharges, spendingByCategory, formatCurrency, formatCurrencyWithConversion, formatDate, handleTrialAction }: any) {
+function OverviewTab({
+  budgetProfile,
+  subscriptions,
+  trialsEnding,
+  upcomingCharges,
+  spendingByCategory,
+  formatCurrency,
+  formatCurrencyWithConversion,
+  formatDate,
+  handleTrialAction,
+}: any) {
   const totalSpend = subscriptions.reduce((total: number, sub: Subscription) => {
     const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
     return total + monthlyAmount
   }, 0)
 
   const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
-  
+
   // Calculate safe to spend with enhanced logic
   const today = new Date()
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
   const dayOfMonth = today.getDate()
   const daysRemaining = daysInMonth - dayOfMonth + 1
-  
+
   // Safe daily spend calculation
   const safeToSpendDaily = remainingBudget / daysRemaining
-  
+
   // Determine if overspending (comparing against original daily allowance)
   const isOverspending = safeToSpendDaily < (remainingBudget / 30) * 0.8 // 20% buffer
   const isUnderspending = safeToSpendDaily > (remainingBudget / 30) * 1.2 // 20% buffer
-  
+
   // Color and message logic
   const getSafeSpendColor = () => {
-    if (remainingBudget <= 0) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (remainingBudget <= 0)
+      return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
     if (isOverspending) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
-    if (isUnderspending) return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
+    if (isUnderspending)
+      return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
     return { bg: 'bg-yellow-50', text: 'text-yellow-800', amount: 'text-yellow-900' }
   }
-  
+
   const getSafeSpendMessage = () => {
-    if (remainingBudget <= 0) return "Budget Exceeded"
-    if (isOverspending) return "Reduce Spending"
-    if (isUnderspending) return "Safe to Spend"
-    return "On Track"
+    if (remainingBudget <= 0) return 'Budget Exceeded'
+    if (isOverspending) return 'Reduce Spending'
+    if (isUnderspending) return 'Safe to Spend'
+    return 'On Track'
   }
-  
+
   const safeSpendColors = getSafeSpendColor()
 
   return (
@@ -1238,11 +1508,15 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
         <div className="space-y-4">
           <div className="flex justify-between items-center py-2 border-b">
             <span className="text-gray-600">Monthly Income</span>
-            <span className="font-medium">{formatCurrency(budgetProfile?.monthly_income || 0)}</span>
+            <span className="font-medium">
+              {formatCurrency(budgetProfile?.monthly_income || 0)}
+            </span>
           </div>
           <div className="flex justify-between items-center py-2 border-b">
             <span className="text-gray-600">Fixed Expenses</span>
-            <span className="font-medium">-{formatCurrency(budgetProfile?.fixed_expenses || 0)}</span>
+            <span className="font-medium">
+              -{formatCurrency(budgetProfile?.fixed_expenses || 0)}
+            </span>
           </div>
           <div className="flex justify-between items-center py-2 border-b">
             <span className="text-gray-600">Subscriptions</span>
@@ -1250,16 +1524,22 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
           </div>
           <div className="flex justify-between items-center py-2 border-b">
             <span className="text-gray-600">Discretionary</span>
-            <span className="font-medium">{formatCurrency(budgetProfile?.discretionary_budget || 0)}</span>
+            <span className="font-medium">
+              {formatCurrency(budgetProfile?.discretionary_budget || 0)}
+            </span>
           </div>
           <div className="flex justify-between items-center py-2 pt-4 border-t-2">
             <span className="text-gray-900 font-medium">Remaining Budget</span>
-            <span className={`font-bold ${remainingBudget >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <span
+              className={`font-bold ${remainingBudget >= 0 ? 'text-green-600' : 'text-red-600'}`}
+            >
               {formatCurrency(remainingBudget)}
             </span>
           </div>
           <div className={`${safeSpendColors.bg} p-3 rounded-lg`}>
-            <div className={`text-sm ${safeSpendColors.text}`}>Daily Safe to Spend • {getSafeSpendMessage()}</div>
+            <div className={`text-sm ${safeSpendColors.text}`}>
+              Daily Safe to Spend • {getSafeSpendMessage()}
+            </div>
             <div className={`text-lg font-bold ${safeSpendColors.amount}`}>
               {formatCurrency(Math.max(0, safeToSpendDaily))}
             </div>
@@ -1276,7 +1556,13 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
           <h4 className="text-md font-medium text-gray-900 mb-4">Spending by Category</h4>
           <div className="space-y-2">
             {spendingByCategory.map((item: any, index: number) => {
-              const colors = ['bg-green-500', 'bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500']
+              const colors = [
+                'bg-green-500',
+                'bg-red-500',
+                'bg-blue-500',
+                'bg-yellow-500',
+                'bg-purple-500',
+              ]
               return (
                 <div key={item.category} className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
@@ -1297,8 +1583,18 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
         {trialsEnding.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center space-x-2 mb-2">
-              <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              <svg
+                className="w-5 h-5 text-red-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+                />
               </svg>
               <h4 className="text-red-900 font-medium">Trial Ending Soon</h4>
             </div>
@@ -1307,20 +1603,21 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
                 <div className="flex-1">
                   <div className="font-medium text-red-900">{trial.service_name}</div>
                   <div className="text-sm text-red-700">
-                    Will charge {formatCurrencyWithConversion(trial.amount, trial.currency)} on {formatDate(trial.trial_end_date || '')}
+                    Will charge {formatCurrencyWithConversion(trial.amount, trial.currency)} on{' '}
+                    {formatDate(trial.trial_end_date || '')}
                   </div>
                   <div className="text-xs text-red-600 mt-1">
                     Trial ends {formatDate(trial.trial_end_date || '')} • {trial.category}
                   </div>
                 </div>
                 <div className="flex space-x-2">
-                  <button 
+                  <button
                     className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors"
                     onClick={() => handleTrialAction(trial.id, 'start')}
                   >
                     Start Subscription
                   </button>
-                  <button 
+                  <button
                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-colors"
                     onClick={() => handleTrialAction(trial.id, 'cancel')}
                   >
@@ -1337,10 +1634,15 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
           <h4 className="text-md font-medium text-gray-900 mb-4">Upcoming Charges</h4>
           <div className="space-y-3">
             {upcomingCharges.slice(0, 5).map((charge: Subscription) => (
-              <div key={charge.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div
+                key={charge.id}
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+              >
                 <div className="flex items-center space-x-3">
                   <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                    <span className="text-gray-600 font-medium text-sm">{charge.service_name[0]}</span>
+                    <span className="text-gray-600 font-medium text-sm">
+                      {charge.service_name[0]}
+                    </span>
                   </div>
                   <div>
                     <div className="font-medium text-gray-900">{charge.service_name}</div>
@@ -1360,11 +1662,25 @@ function OverviewTab({ budgetProfile, subscriptions, trialsEnding, upcomingCharg
   )
 }
 
-function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatDate, onEdit, onCancel, onDuplicate, onDelete, onAddNew, openMenuId, setOpenMenuId }: any) {
+function SubscriptionsTab({
+  subscriptions,
+  formatCurrencyWithConversion,
+  formatDate,
+  onEdit,
+  onCancel,
+  onDuplicate,
+  onDelete,
+  onAddNew,
+  openMenuId,
+  setOpenMenuId,
+}: any) {
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
 
-  const categories = ['all', ...Array.from(new Set(subscriptions.map((sub: Subscription) => sub.category || 'Other')))] as string[]
+  const categories = [
+    'all',
+    ...Array.from(new Set(subscriptions.map((sub: Subscription) => sub.category || 'Other'))),
+  ] as string[]
 
   const filteredSubscriptions = subscriptions.filter((sub: Subscription) => {
     const categoryMatch = filterCategory === 'all' || sub.category === filterCategory
@@ -1382,23 +1698,30 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center space-x-2"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
             </svg>
             <span>Add Subscription</span>
           </button>
-          <select 
-            value={filterCategory} 
-            onChange={(e) => setFilterCategory(e.target.value)}
+          <select
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-1 text-sm"
           >
             <option value="all">All Categories</option>
             {categories.slice(1).map((cat: string) => (
-              <option key={cat} value={cat}>{cat}</option>
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
             ))}
           </select>
-          <select 
-            value={filterStatus} 
-            onChange={(e) => setFilterStatus(e.target.value)}
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-1 text-sm"
           >
             <option value="all">All Status</option>
@@ -1411,7 +1734,10 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
 
       <div className="space-y-3">
         {filteredSubscriptions.map((sub: Subscription) => (
-          <div key={sub.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100">
+          <div
+            key={sub.id}
+            className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100"
+          >
             <div className="flex items-center space-x-4">
               <div className="w-10 h-10 bg-white rounded-lg border flex items-center justify-center">
                 <span className="font-medium text-gray-700">{sub.service_name[0]}</span>
@@ -1419,12 +1745,20 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
               <div>
                 <div className="flex items-center space-x-2">
                   <span className="font-medium text-gray-900">{sub.service_name}</span>
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    sub.status === 'trial' ? 'bg-yellow-100 text-yellow-800' : 
-                    sub.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
-                    {sub.status === 'trial' ? 'Trial' : sub.status === 'cancelled' ? 'Cancelled' : 'Active'}
+                  <span
+                    className={`text-xs px-2 py-1 rounded-full ${
+                      sub.status === 'trial'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : sub.status === 'cancelled'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-green-100 text-green-800'
+                    }`}
+                  >
+                    {sub.status === 'trial'
+                      ? 'Trial'
+                      : sub.status === 'cancelled'
+                        ? 'Cancelled'
+                        : 'Active'}
                   </span>
                 </div>
                 <div className="text-sm text-gray-500">{sub.category}</div>
@@ -1432,7 +1766,9 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
             </div>
             <div className="flex items-center space-x-6">
               <div className="text-right">
-                <div className="font-medium text-gray-900">{formatCurrencyWithConversion(sub.amount, sub.currency)}</div>
+                <div className="font-medium text-gray-900">
+                  {formatCurrencyWithConversion(sub.amount, sub.currency)}
+                </div>
                 <div className="text-sm text-gray-500 capitalize">{sub.frequency}</div>
               </div>
               <div className="text-right">
@@ -1440,23 +1776,33 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                 <div className="text-xs text-gray-500">Next charge</div>
               </div>
               <div className="flex items-center space-x-2">
-                <button 
+                <button
                   onClick={() => onEdit(sub)}
                   className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
                   title="Edit subscription"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                    />
                   </svg>
                 </button>
                 <div className="relative">
-                  <button 
+                  <button
                     onClick={() => setOpenMenuId(openMenuId === sub.id ? null : sub.id)}
                     className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
                     title="More actions"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                      />
                     </svg>
                   </button>
                   {openMenuId === sub.id && (
@@ -1470,8 +1816,18 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           <div className="flex items-center space-x-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                              />
                             </svg>
                             <span>Edit</span>
                           </div>
@@ -1485,8 +1841,18 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                             className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                           >
                             <div className="flex items-center space-x-2">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              <svg
+                                className="w-4 h-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
                               </svg>
                               <span>Cancel Subscription</span>
                             </div>
@@ -1500,8 +1866,18 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                           className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
                           <div className="flex items-center space-x-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                              />
                             </svg>
                             <span>Duplicate</span>
                           </div>
@@ -1514,8 +1890,18 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
                           className="block w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50"
                         >
                           <div className="flex items-center space-x-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                              />
                             </svg>
                             <span>Delete</span>
                           </div>
@@ -1536,35 +1922,37 @@ function SubscriptionsTab({ subscriptions, formatCurrencyWithConversion, formatD
 function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurrency }: any) {
   const budgetUsage = budgetProfile ? (totalSpend / budgetProfile.discretionary_budget) * 100 : 0
   const remainingBudget = (budgetProfile?.discretionary_budget || 0) - totalSpend
-  
+
   // Calculate safe to spend with enhanced logic
   const today = new Date()
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
   const dayOfMonth = today.getDate()
   const daysRemaining = daysInMonth - dayOfMonth + 1
-  
+
   // Safe daily spend calculation
   const safeToSpendDaily = remainingBudget / daysRemaining
-  
+
   // Determine if overspending (comparing against original daily allowance)
   const isOverspending = safeToSpendDaily < (remainingBudget / 30) * 0.8 // 20% buffer
   const isUnderspending = safeToSpendDaily > (remainingBudget / 30) * 1.2 // 20% buffer
-  
+
   // Color and message logic
   const getSafeSpendColor = () => {
-    if (remainingBudget <= 0) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
+    if (remainingBudget <= 0)
+      return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
     if (isOverspending) return { bg: 'bg-red-50', text: 'text-red-800', amount: 'text-red-900' }
-    if (isUnderspending) return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
+    if (isUnderspending)
+      return { bg: 'bg-green-50', text: 'text-green-800', amount: 'text-green-900' }
     return { bg: 'bg-yellow-50', text: 'text-yellow-800', amount: 'text-yellow-900' }
   }
-  
+
   const getSafeSpendMessage = () => {
-    if (remainingBudget <= 0) return "Budget Exceeded"
-    if (isOverspending) return "Reduce Spending"
-    if (isUnderspending) return "Safe to Spend"
-    return "On Track"
+    if (remainingBudget <= 0) return 'Budget Exceeded'
+    if (isOverspending) return 'Reduce Spending'
+    if (isUnderspending) return 'Safe to Spend'
+    return 'On Track'
   }
-  
+
   const safeSpendColors = getSafeSpendColor()
 
   return (
@@ -1580,17 +1968,21 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
             Set Your Budget
           </Link>
         </div>
-        
+
         <div className="space-y-6">
           <div className="bg-blue-50 p-4 rounded-lg">
             <div className="text-sm text-blue-600 font-medium">Monthly Income</div>
-            <div className="text-2xl font-bold text-blue-900">{formatCurrency(budgetProfile?.monthly_income || 0)}</div>
+            <div className="text-2xl font-bold text-blue-900">
+              {formatCurrency(budgetProfile?.monthly_income || 0)}
+            </div>
           </div>
 
           <div className="space-y-3">
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-700">Fixed Expenses</span>
-              <span className="font-medium text-red-600">{formatCurrency(budgetProfile?.fixed_expenses || 0)}</span>
+              <span className="font-medium text-red-600">
+                {formatCurrency(budgetProfile?.fixed_expenses || 0)}
+              </span>
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-700">Subscriptions</span>
@@ -1598,13 +1990,19 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
               <span className="text-gray-700">Discretionary</span>
-              <span className="font-medium text-green-600">{formatCurrency(budgetProfile?.discretionary_budget || 0)}</span>
+              <span className="font-medium text-green-600">
+                {formatCurrency(budgetProfile?.discretionary_budget || 0)}
+              </span>
             </div>
           </div>
 
-          <div className={`${safeSpendColors.bg} p-4 rounded-lg border-t-4 ${remainingBudget >= 0 ? 'border-green-500' : 'border-red-500'}`}>
+          <div
+            className={`${safeSpendColors.bg} p-4 rounded-lg border-t-4 ${remainingBudget >= 0 ? 'border-green-500' : 'border-red-500'}`}
+          >
             <div className={`text-sm ${safeSpendColors.text} font-medium`}>Remaining Budget</div>
-            <div className={`text-2xl font-bold ${remainingBudget >= 0 ? 'text-green-900' : 'text-red-900'}`}>
+            <div
+              className={`text-2xl font-bold ${remainingBudget >= 0 ? 'text-green-900' : 'text-red-900'}`}
+            >
               {formatCurrency(remainingBudget)}
             </div>
             <div className={`text-sm ${safeSpendColors.text} mt-1`}>
@@ -1617,7 +2015,7 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
         <div className="mt-8">
           <h4 className="text-md font-medium text-gray-900 mb-4">Subscription Budget Usage</h4>
           <div className="bg-gray-200 rounded-full h-4">
-            <div 
+            <div
               className={`h-4 rounded-full ${budgetUsage > 80 ? 'bg-red-500' : budgetUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
               style={{ width: `${Math.min(budgetUsage, 100)}%` }}
             ></div>
@@ -1635,12 +2033,18 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
       {/* Right: Spending Breakdown */}
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-6">Spending by Category</h3>
-        
+
         <div className="space-y-4">
           {spendingByCategory.map((item: any, index: number) => {
-            const colors = ['bg-green-500', 'bg-red-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500']
+            const colors = [
+              'bg-green-500',
+              'bg-red-500',
+              'bg-blue-500',
+              'bg-yellow-500',
+              'bg-purple-500',
+            ]
             const percentage = totalSpend > 0 ? (item.amount / totalSpend) * 100 : 0
-            
+
             return (
               <div key={item.category} className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -1654,7 +2058,7 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
                   </div>
                 </div>
                 <div className="bg-gray-200 rounded-full h-2">
-                  <div 
+                  <div
                     className={`h-2 rounded-full ${colors[index % colors.length]}`}
                     style={{ width: `${percentage}%` }}
                   ></div>
@@ -1666,8 +2070,12 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
 
         {/* Daily Safe Spending Breakdown */}
         <div className={`mt-8 ${safeSpendColors.bg} p-4 rounded-lg`}>
-          <h4 className={`text-md font-medium ${safeSpendColors.text} mb-3`}>Daily Safe to Spend • {getSafeSpendMessage()}</h4>
-          <div className={`text-2xl font-bold ${safeSpendColors.amount}`}>{formatCurrency(Math.max(0, safeToSpendDaily))}</div>
+          <h4 className={`text-md font-medium ${safeSpendColors.text} mb-3`}>
+            Daily Safe to Spend • {getSafeSpendMessage()}
+          </h4>
+          <div className={`text-2xl font-bold ${safeSpendColors.amount}`}>
+            {formatCurrency(Math.max(0, safeToSpendDaily))}
+          </div>
           <div className={`text-sm ${safeSpendColors.text} mt-1`}>
             Available for daily discretionary spending ({daysRemaining} days left)
           </div>
@@ -1677,7 +2085,12 @@ function BudgetTab({ budgetProfile, totalSpend, spendingByCategory, formatCurren
   )
 }
 
-function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConversion, formatDate }: any) {
+function UpcomingTab({
+  upcomingCharges,
+  formatCurrency,
+  formatCurrencyWithConversion,
+  formatDate,
+}: any) {
   const groupedCharges = upcomingCharges.reduce((acc: any, charge: Subscription) => {
     const date = charge.next_charge_date
     if (!acc[date]) acc[date] = []
@@ -1685,8 +2098,8 @@ function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConver
     return acc
   }, {})
 
-  const sortedDates = Object.keys(groupedCharges).sort((a, b) => 
-    new Date(a).getTime() - new Date(b).getTime()
+  const sortedDates = Object.keys(groupedCharges).sort(
+    (a, b) => new Date(a).getTime() - new Date(b).getTime()
   )
 
   return (
@@ -1706,10 +2119,13 @@ function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConver
                   {groupedCharges[date].length} charge{groupedCharges[date].length !== 1 ? 's' : ''}
                 </div>
               </div>
-              
+
               <div className="space-y-3">
                 {groupedCharges[date].map((charge: Subscription) => (
-                  <div key={charge.id} className="flex items-center justify-between p-4 bg-white border rounded-lg shadow-sm">
+                  <div
+                    key={charge.id}
+                    className="flex items-center justify-between p-4 bg-white border rounded-lg shadow-sm"
+                  >
                     <div className="flex items-center space-x-4">
                       <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
                         <span className="font-medium text-gray-700">{charge.service_name[0]}</span>
@@ -1719,18 +2135,24 @@ function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConver
                         <div className="text-sm text-gray-500">{charge.category}</div>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center space-x-4">
                       <div className="text-right">
-                        <div className="font-medium text-gray-900">{formatCurrencyWithConversion(charge.amount, charge.currency)}</div>
+                        <div className="font-medium text-gray-900">
+                          {formatCurrencyWithConversion(charge.amount, charge.currency)}
+                        </div>
                         <div className="text-sm text-gray-500 capitalize">{charge.frequency}</div>
                       </div>
-                      
-                      <span className={`px-3 py-1 text-xs font-medium rounded-full ${
-                        formatDate(charge.next_charge_date) === 'Today' ? 'bg-red-100 text-red-800' :
-                        formatDate(charge.next_charge_date) === 'Tomorrow' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
+
+                      <span
+                        className={`px-3 py-1 text-xs font-medium rounded-full ${
+                          formatDate(charge.next_charge_date) === 'Today'
+                            ? 'bg-red-100 text-red-800'
+                            : formatDate(charge.next_charge_date) === 'Tomorrow'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
                         {formatDate(charge.next_charge_date)}
                       </span>
                     </div>
@@ -1739,19 +2161,34 @@ function UpcomingTab({ upcomingCharges, formatCurrency, formatCurrencyWithConver
               </div>
             </div>
           ))}
-          
+
           <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
             <div className="text-sm text-blue-800">
-              <strong>Total this week:</strong> {formatCurrency(
-                upcomingCharges.reduce((total: number, charge: Subscription) => total + charge.amount, 0)
-              )} <span className="text-xs">(USD equivalent)</span>
+              <strong>Total this week:</strong>{' '}
+              {formatCurrency(
+                upcomingCharges.reduce(
+                  (total: number, charge: Subscription) => total + charge.amount,
+                  0
+                )
+              )}{' '}
+              <span className="text-xs">(USD equivalent)</span>
             </div>
           </div>
         </div>
       ) : (
         <div className="text-center py-12">
-          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          <svg
+            className="mx-auto h-12 w-12 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
           </svg>
           <h3 className="mt-2 text-sm font-medium text-gray-900">No upcoming charges</h3>
           <p className="mt-1 text-sm text-gray-500">
@@ -1772,14 +2209,22 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
     frequency: initialData?.frequency || 'monthly',
     next_charge_date: initialData?.next_charge_date || '',
     category: initialData?.category || '',
-    status: initialData?.status || 'active'
+    status: initialData?.status || 'active',
   })
 
-  const categories = ['Entertainment', 'Music', 'Productivity', 'Development', 'Design', 'AI Tools', 'Other']
+  const categories = [
+    'Entertainment',
+    'Music',
+    'Productivity',
+    'Development',
+    'Design',
+    'AI Tools',
+    'Other',
+  ]
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!formData.service_name || !formData.amount || !formData.next_charge_date) {
       alert('Please fill in all required fields (Service Name, Amount, Next Charge Date)')
       return
@@ -1787,7 +2232,7 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
 
     onSubmit({
       ...formData,
-      amount: parseFloat(formData.amount)
+      amount: parseFloat(formData.amount),
     })
   }
 
@@ -1807,20 +2252,23 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
             </h3>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Service Name *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Service Name *</label>
               <input
                 type="text"
                 value={formData.service_name}
-                onChange={(e) => handleChange('service_name', e.target.value)}
+                onChange={e => handleChange('service_name', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="e.g., Netflix, Spotify"
                 required
@@ -1829,26 +2277,22 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
                 <input
                   type="number"
                   step="0.01"
                   value={formData.amount}
-                  onChange={(e) => handleChange('amount', e.target.value)}
+                  onChange={e => handleChange('amount', e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="9.99"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Currency
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
                 <select
                   value={formData.currency}
-                  onChange={(e) => handleChange('currency', e.target.value)}
+                  onChange={e => handleChange('currency', e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="USD">USD</option>
@@ -1865,7 +2309,7 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
               </label>
               <select
                 value={formData.frequency}
-                onChange={(e) => handleChange('frequency', e.target.value)}
+                onChange={e => handleChange('frequency', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="monthly">Monthly</option>
@@ -1882,35 +2326,33 @@ function AddSubscriptionModal({ isOpen, onClose, onSubmit, initialData }: any) {
               <input
                 type="date"
                 value={formData.next_charge_date}
-                onChange={(e) => handleChange('next_charge_date', e.target.value)}
+                onChange={e => handleChange('next_charge_date', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
               <select
                 value={formData.category}
-                onChange={(e) => handleChange('category', e.target.value)}
+                onChange={e => handleChange('category', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select Category</option>
                 {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
               <select
                 value={formData.status}
-                onChange={(e) => handleChange('status', e.target.value)}
+                onChange={e => handleChange('status', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="active">Active</option>
@@ -1951,14 +2393,22 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
     frequency: subscription?.frequency || 'monthly',
     next_charge_date: subscription?.next_charge_date || '',
     category: subscription?.category || '',
-    status: subscription?.status || 'active'
+    status: subscription?.status || 'active',
   })
 
-  const categories = ['Entertainment', 'Music', 'Productivity', 'Development', 'Design', 'AI Tools', 'Other']
+  const categories = [
+    'Entertainment',
+    'Music',
+    'Productivity',
+    'Development',
+    'Design',
+    'AI Tools',
+    'Other',
+  ]
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!formData.service_name || !formData.amount || !formData.next_charge_date) {
       alert('Please fill in all required fields (Service Name, Amount, Next Charge Date)')
       return
@@ -1966,7 +2416,7 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
 
     onSubmit({
       ...formData,
-      amount: parseFloat(formData.amount)
+      amount: parseFloat(formData.amount),
     })
   }
 
@@ -1984,20 +2434,23 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
             <h3 className="text-lg font-medium text-gray-900">Edit Subscription</h3>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Service Name *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Service Name *</label>
               <input
                 type="text"
                 value={formData.service_name}
-                onChange={(e) => handleChange('service_name', e.target.value)}
+                onChange={e => handleChange('service_name', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="e.g., Netflix, Spotify"
                 required
@@ -2006,26 +2459,22 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
                 <input
                   type="number"
                   step="0.01"
                   value={formData.amount}
-                  onChange={(e) => handleChange('amount', e.target.value)}
+                  onChange={e => handleChange('amount', e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="9.99"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Currency
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
                 <select
                   value={formData.currency}
-                  onChange={(e) => handleChange('currency', e.target.value)}
+                  onChange={e => handleChange('currency', e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="USD">USD</option>
@@ -2042,7 +2491,7 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
               </label>
               <select
                 value={formData.frequency}
-                onChange={(e) => handleChange('frequency', e.target.value)}
+                onChange={e => handleChange('frequency', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="monthly">Monthly</option>
@@ -2059,35 +2508,33 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
               <input
                 type="date"
                 value={formData.next_charge_date}
-                onChange={(e) => handleChange('next_charge_date', e.target.value)}
+                onChange={e => handleChange('next_charge_date', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
               <select
                 value={formData.category}
-                onChange={(e) => handleChange('category', e.target.value)}
+                onChange={e => handleChange('category', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select Category</option>
                 {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
               <select
                 value={formData.status}
-                onChange={(e) => handleChange('status', e.target.value)}
+                onChange={e => handleChange('status', e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="active">Active</option>
@@ -2118,12 +2565,12 @@ function EditSubscriptionModal({ isOpen, onClose, onSubmit, subscription }: any)
   )
 }
 
-const TrialConversionModal = ({ 
-  isOpen, 
-  onClose, 
-  trial, 
-  onConvert 
-}: { 
+const TrialConversionModal = ({
+  isOpen,
+  onClose,
+  trial,
+  onConvert,
+}: {
   isOpen: boolean
   onClose: () => void
   trial: any
@@ -2135,14 +2582,14 @@ const TrialConversionModal = ({
     billingCycle: trial?.billingCycle || '',
     nextPayment: trial?.nextPayment || '',
     category: trial?.category || '',
-    status: 'active' as const
+    status: 'active' as const,
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     onConvert({
       ...formData,
-      id: Date.now() // Generate new ID for active subscription
+      id: Date.now(), // Generate new ID for active subscription
     })
     onClose()
   }
@@ -2161,39 +2608,33 @@ const TrialConversionModal = ({
         <h2 className="text-xl font-semibold mb-4">Convert Trial to Subscription</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Service Name
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
             <input
               type="text"
               value={formData.name}
-              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Price
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Price</label>
             <input
               type="number"
               step="0.01"
               value={formData.price}
-              onChange={(e) => setFormData(prev => ({ ...prev, price: e.target.value }))}
+              onChange={e => setFormData(prev => ({ ...prev, price: e.target.value }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Billing Cycle
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Billing Cycle</label>
             <select
               value={formData.billingCycle}
-              onChange={(e) => setFormData(prev => ({ ...prev, billingCycle: e.target.value }))}
+              onChange={e => setFormData(prev => ({ ...prev, billingCycle: e.target.value }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             >
@@ -2211,19 +2652,17 @@ const TrialConversionModal = ({
             <input
               type="date"
               value={formData.nextPayment}
-              onChange={(e) => setFormData(prev => ({ ...prev, nextPayment: e.target.value }))}
+              onChange={e => setFormData(prev => ({ ...prev, nextPayment: e.target.value }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Category
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
             <select
               value={formData.category}
-              onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+              onChange={e => setFormData(prev => ({ ...prev, category: e.target.value }))}
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               required
             >

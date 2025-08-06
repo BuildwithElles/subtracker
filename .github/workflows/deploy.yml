@@ -1,0 +1,182 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual deployment
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # Pre-deployment validation
+  pre-deploy-checks:
+    name: 🔍 Pre-Deploy Validation
+    runs-on: ubuntu-latest
+
+    outputs:
+      should-deploy: ${{ steps.check.outputs.should-deploy }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Full validation suite
+        run: |
+          echo "Running comprehensive pre-deployment checks..."
+          npm run lint
+          npm run format:check
+          npx tsc --noEmit
+
+      - name: 🏗️ Production build test
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: 📊 Get package version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: ✅ Deployment check
+        id: check
+        run: echo "should-deploy=true" >> $GITHUB_OUTPUT
+
+  # Deploy to Vercel
+  deploy-vercel:
+    name: 🚀 Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    if: needs.pre-deploy-checks.outputs.should-deploy == 'true'
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Build for production
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: 🚀 Deploy to Vercel
+        id: deploy
+        uses: vercel/action@v1
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: ${{ github.event.inputs.environment == 'staging' && '--target staging' || '--prod' }}
+
+  # Alternative: Deploy to Netlify
+  deploy-netlify:
+    name: 🌐 Deploy to Netlify (Alternative)
+    runs-on: ubuntu-latest
+    needs: pre-deploy-checks
+    if: needs.pre-deploy-checks.outputs.should-deploy == 'true' && false # Disabled by default
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Build for production
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: 🌐 Deploy to Netlify
+        uses: netlify/actions/deploy@master
+        with:
+          publish-dir: './dist'
+          production-branch: main
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: 'Deploy from GitHub Actions - v${{ needs.pre-deploy-checks.outputs.version }}'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  # Post-deployment verification
+  post-deploy-checks:
+    name: ✅ Post-Deploy Verification
+    runs-on: ubuntu-latest
+    needs: [pre-deploy-checks, deploy-vercel]
+    if: always() && needs.deploy-vercel.result == 'success'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🏃 Health check
+        run: |
+          echo "Performing post-deployment health checks..."
+          # Add health check URL when available
+          # curl -f https://your-app-url.vercel.app/health || exit 1
+
+      - name: 📊 Performance check
+        run: |
+          echo "Running basic performance checks..."
+          # Add lighthouse CI or similar when ready
+
+      - name: 📧 Notify team
+        if: success()
+        run: |
+          echo "✅ Deployment successful! Version: ${{ needs.pre-deploy-checks.outputs.version }}"
+          # Add Slack/Discord notification here if needed
+
+  # Rollback capability
+  rollback:
+    name: ⏪ Emergency Rollback
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'workflow_dispatch'
+    environment: production
+
+    steps:
+      - name: ⏪ Trigger rollback
+        run: |
+          echo "Emergency rollback triggered"
+          # Add rollback logic here
+          # This could involve deploying the previous known good version

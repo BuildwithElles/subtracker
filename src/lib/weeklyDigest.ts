@@ -1,5 +1,7 @@
 // Weekly Digest System for Subscription Management
 import { supabase } from './supabase'
+import type { Subscription } from '../types'
+import type { BudgetProfile } from './budgetAnalytics'
 
 export interface WeeklyDigest {
   id: string
@@ -54,7 +56,7 @@ class WeeklyDigestSystem {
   private scheduleWeeklyDigest() {
     const now = new Date()
     const nextSunday = new Date(now)
-    nextSunday.setDate(now.getDate() + (7 - now.getDay()) % 7)
+    nextSunday.setDate(now.getDate() + ((7 - now.getDay()) % 7))
     nextSunday.setHours(9, 0, 0, 0)
 
     // If it's already past 9 AM on Sunday, schedule for next week
@@ -67,12 +69,14 @@ class WeeklyDigestSystem {
     // Schedule the first digest
     setTimeout(() => {
       this.generateWeeklyDigests()
-      
+
       // Then schedule recurring digests every week
-      this.digestInterval = setInterval(() => {
-        this.generateWeeklyDigests()
-      }, 7 * 24 * 60 * 60 * 1000) // 7 days
-      
+      this.digestInterval = setInterval(
+        () => {
+          this.generateWeeklyDigests()
+        },
+        7 * 24 * 60 * 60 * 1000
+      ) // 7 days
     }, timeUntilNextDigest)
 
     console.log(`Next weekly digest scheduled for: ${nextSunday.toLocaleString()}`)
@@ -111,7 +115,6 @@ class WeeklyDigestSystem {
       }
 
       console.log(`Generated weekly digests for ${uniqueUserIds.length} users`)
-
     } catch (error) {
       console.error('Error generating weekly digests:', error)
     }
@@ -133,7 +136,9 @@ class WeeklyDigestSystem {
         .maybeSingle()
 
       if (existingDigest) {
-        console.log(`Digest already exists for user ${userId} for week ${weekStart.toISOString().split('T')[0]}`)
+        console.log(
+          `Digest already exists for user ${userId} for week ${weekStart.toISOString().split('T')[0]}`
+        )
         return existingDigest
       }
 
@@ -156,10 +161,16 @@ class WeeklyDigestSystem {
         .single()
 
       // Calculate digest statistics
-      const stats = await this.calculateDigestStats(userId, subscriptions, weekStart, weekEnd, budgetProfile)
+      const stats = await this.calculateDigestStats(
+        userId,
+        subscriptions,
+        weekStart,
+        weekEnd,
+        budgetProfile
+      )
 
       // Generate recommendations
-      const recommendations = this.generateRecommendations(stats, subscriptions, budgetProfile)
+      const recommendations = this.generateRecommendations(stats, subscriptions)
 
       // Create digest object
       const digest: Omit<WeeklyDigest, 'id'> = {
@@ -175,7 +186,7 @@ class WeeklyDigestSystem {
         upcoming_trials_ending: stats.trialsEndingSoon,
         upcoming_charges: stats.upcomingCharges,
         recommendations,
-        generated_at: new Date().toISOString()
+        generated_at: new Date().toISOString(),
       }
 
       // Store digest in database
@@ -195,7 +206,6 @@ class WeeklyDigestSystem {
 
       console.log(`Generated weekly digest for user ${userId}`)
       return savedDigest
-
     } catch (error) {
       console.error('Error generating user weekly digest:', error)
       return null
@@ -205,10 +215,10 @@ class WeeklyDigestSystem {
   // Calculate digest statistics
   private async calculateDigestStats(
     _userId: string,
-    subscriptions: any[],
+    subscriptions: Subscription[],
     weekStart: Date,
     weekEnd: Date,
-    budgetProfile: any
+    budgetProfile: BudgetProfile
   ): Promise<DigestStats> {
     // Calculate weekly spending (charges that occurred this week)
     const activeSubscriptions = subscriptions.filter(sub => sub.status === 'active')
@@ -222,13 +232,16 @@ class WeeklyDigestSystem {
 
     // Count new subscriptions this week
     const newSubscriptions = subscriptions.filter(sub => {
+      if (!sub.created_at) return false
       const createdDate = new Date(sub.created_at)
       return createdDate >= weekStart && createdDate <= weekEnd
     }).length
 
     // Count cancelled subscriptions this week
     const cancelledSubscriptions = subscriptions.filter(sub => {
-      const updatedDate = new Date(sub.updated_at || sub.created_at)
+      const dateToCheck = sub.updated_at || sub.created_at
+      if (!dateToCheck) return false
+      const updatedDate = new Date(dateToCheck)
       return sub.status === 'cancelled' && updatedDate >= weekStart && updatedDate <= weekEnd
     }).length
 
@@ -239,7 +252,9 @@ class WeeklyDigestSystem {
     const totalMonthlySpending = activeSubscriptions.reduce((total, sub) => {
       return total + (sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount)
     }, 0)
-    const budgetUsage = budgetProfile ? (totalMonthlySpending / budgetProfile.discretionary_budget) * 100 : 0
+    const budgetUsage = budgetProfile
+      ? (totalMonthlySpending / budgetProfile.discretionary_budget) * 100
+      : 0
 
     // Get top category
     const categorySpending = this.getTopCategories(subscriptions)
@@ -269,19 +284,23 @@ class WeeklyDigestSystem {
       budgetUsage,
       topCategory,
       trialsEndingSoon,
-      upcomingCharges
+      upcomingCharges,
     }
   }
 
   // Get top spending categories
-  private getTopCategories(subscriptions: any[]): Array<{ category: string; amount: number }> {
+  private getTopCategories(
+    subscriptions: Subscription[]
+  ): Array<{ category: string; amount: number }> {
     const categorySpending: { [key: string]: number } = {}
-    
-    subscriptions.filter(sub => sub.status === 'active').forEach(sub => {
-      const category = sub.category || 'Other'
-      const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
-      categorySpending[category] = (categorySpending[category] || 0) + monthlyAmount
-    })
+
+    subscriptions
+      .filter(sub => sub.status === 'active')
+      .forEach(sub => {
+        const category = sub.category || 'Other'
+        const monthlyAmount = sub.frequency === 'yearly' ? sub.amount / 12 : sub.amount
+        categorySpending[category] = (categorySpending[category] || 0) + monthlyAmount
+      })
 
     return Object.entries(categorySpending)
       .map(([category, amount]) => ({ category, amount }))
@@ -290,39 +309,47 @@ class WeeklyDigestSystem {
   }
 
   // Generate personalized recommendations
-  private generateRecommendations(stats: DigestStats, subscriptions: any[], _budgetProfile: any): string[] {
+  private generateRecommendations(stats: DigestStats, subscriptions: Subscription[]): string[] {
     const recommendations: string[] = []
 
     // Budget-based recommendations
     if (stats.budgetUsage > 90) {
       recommendations.push("You're over budget! Consider cancelling unused subscriptions.")
     } else if (stats.budgetUsage > 75) {
-      recommendations.push("Approaching budget limit. Review your subscriptions to stay on track.")
+      recommendations.push('Approaching budget limit. Review your subscriptions to stay on track.')
     } else if (stats.budgetUsage < 50) {
-      recommendations.push("Great budget management! You have room for new services if needed.")
+      recommendations.push('Great budget management! You have room for new services if needed.')
     }
 
     // Trial-based recommendations
     if (stats.trialsEndingSoon > 0) {
-      recommendations.push(`${stats.trialsEndingSoon} trial${stats.trialsEndingSoon > 1 ? 's' : ''} ending soon. Decide before they auto-charge!`)
+      recommendations.push(
+        `${stats.trialsEndingSoon} trial${stats.trialsEndingSoon > 1 ? 's' : ''} ending soon. Decide before they auto-charge!`
+      )
     }
 
     // Subscription management recommendations
     if (stats.newSubscriptions > 2) {
-      recommendations.push("You added several new subscriptions this week. Monitor their value to avoid subscription creep.")
+      recommendations.push(
+        'You added several new subscriptions this week. Monitor their value to avoid subscription creep.'
+      )
     }
 
     // Category-based recommendations
     if (stats.topCategory && subscriptions.length > 5) {
       const categoryCount = subscriptions.filter(sub => sub.category === stats.topCategory).length
       if (categoryCount > 3) {
-        recommendations.push(`You have ${categoryCount} ${stats.topCategory} subscriptions. Consider consolidating to save money.`)
+        recommendations.push(
+          `You have ${categoryCount} ${stats.topCategory} subscriptions. Consider consolidating to save money.`
+        )
       }
     }
 
     // Default helpful tip if no specific recommendations
     if (recommendations.length === 0) {
-      recommendations.push("Your subscriptions look well-managed! Regular reviews help maintain control over spending.")
+      recommendations.push(
+        'Your subscriptions look well-managed! Regular reviews help maintain control over spending.'
+      )
     }
 
     return recommendations.slice(0, 3) // Limit to 3 recommendations
@@ -338,23 +365,20 @@ class WeeklyDigestSystem {
           icon: '/favicon.ico',
           badge: '/favicon.ico',
           tag: `weekly-digest-${digest.id}`,
-          requireInteraction: false
+          requireInteraction: false,
         })
       }
 
       // Store notification as budget alert for consistency
-      await supabase
-        .from('budget_alerts')
-        .insert({
-          user_id: digest.user_id,
-          alert_type: 'weekly_summary',
-          current_spending: digest.total_charges,
-          budget_limit: 0,
-          percentage_used: digest.budget_usage_percentage,
-          sent_at: new Date().toISOString(),
-          acknowledged: false
-        })
-
+      await supabase.from('budget_alerts').insert({
+        user_id: digest.user_id,
+        alert_type: 'weekly_summary',
+        current_spending: digest.total_charges,
+        budget_limit: 0,
+        percentage_used: digest.budget_usage_percentage,
+        sent_at: new Date().toISOString(),
+        acknowledged: false,
+      })
     } catch (error) {
       console.error('Error sending digest notification:', error)
     }
@@ -396,12 +420,12 @@ class WeeklyDigestSystem {
     weeklyTrend: 'up' | 'down' | 'stable'
   }> {
     const digests = await this.getUserDigests(userId, 2)
-    
+
     if (digests.length === 0) {
       return {
         hasUnviewedDigest: false,
         latestDigest: null,
-        weeklyTrend: 'stable'
+        weeklyTrend: 'stable',
       }
     }
 
@@ -413,7 +437,7 @@ class WeeklyDigestSystem {
       const current = digests[0].total_charges
       const previous = digests[1].total_charges
       const change = ((current - previous) / previous) * 100
-      
+
       if (change > 5) weeklyTrend = 'up'
       else if (change < -5) weeklyTrend = 'down'
     }
@@ -421,22 +445,22 @@ class WeeklyDigestSystem {
     return {
       hasUnviewedDigest,
       latestDigest,
-      weeklyTrend
+      weeklyTrend,
     }
   }
 
   // Helper method to format currency
   private formatCurrency(amount: number, currency: string = 'USD'): string {
     const currencyLocales: { [key: string]: string } = {
-      'USD': 'en-US',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-      'INR': 'en-IN'
+      USD: 'en-US',
+      EUR: 'de-DE',
+      GBP: 'en-GB',
+      INR: 'en-IN',
     }
-    
+
     return new Intl.NumberFormat(currencyLocales[currency] || 'en-US', {
       style: 'currency',
-      currency: currency
+      currency: currency,
     }).format(amount)
   }
 }
