@@ -1,6 +1,9 @@
+import fs from 'fs'
+import path from 'path'
+
 /**
  * 🌍 GLOBAL SETUP FOR E2E TESTS
- * 
+ *
  * Prepares the test environment before running authentication E2E tests
  */
 
@@ -41,7 +44,7 @@ async function globalSetup() {
   
   try {
     // Check if the application is responding
-    const baseURL = process.env.BASE_URL || 'http://localhost:3000'
+    const baseURL = process.env.BASE_URL || 'http://localhost:5173'
     const response = await fetch(baseURL)
     
     if (response.ok) {
@@ -56,9 +59,7 @@ async function globalSetup() {
   
   // Create test directories
   console.log('📁 Setting up test directories...')
-  const fs = require('fs')
-  const path = require('path')
-  
+  // Create test directories using ES module syntax
   const testDirs = [
     'test-results',
     'playwright-report',
@@ -77,7 +78,7 @@ async function globalSetup() {
   console.log('⚙️ Validating test configuration...')
   
   const testConfig = {
-    baseURL: process.env.BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.BASE_URL || 'http://localhost:5173',
     headless: process.env.CI || process.env.HEADLESS,
     workers: process.env.CI ? 1 : 4,
     retries: process.env.CI ? 2 : 0

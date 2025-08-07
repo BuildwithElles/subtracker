@@ -1,0 +1,46 @@
+# Page snapshot
+
+```yaml
+- banner:
+  - text: S
+  - heading "SubTracker" [level=1]
+  - progressbar: 1 2 2 of 2
+- main:
+  - img
+  - heading "Perfect! Now let's set your budget" [level=1]
+  - paragraph: Setting a budget helps you track spending and get alerts before you overspend
+  - heading "Set Your Monthly Budget" [level=2]
+  - paragraph: This helps us track your spending and send you alerts when you're approaching your limits.
+  - text: Monthly Income * $
+  - spinbutton "Monthly Income": "-100"
+  - alert: Amount cannot be negative
+  - text: Housing/Rent $
+  - spinbutton "Housing Expenses": "6000"
+  - text: Food & Groceries $
+  - spinbutton "Food Expenses"
+  - text: Transportation $
+  - spinbutton "Transportation Expenses"
+  - text: Entertainment $
+  - spinbutton "Entertainment Expenses"
+  - text: Savings Target $
+  - spinbutton "Savings Target"
+  - text: Currency
+  - combobox "Currency":
+    - option "USD - US Dollar" [selected]
+    - option "EUR - Euro"
+    - option "GBP - British Pound"
+    - option "CAD - Canadian Dollar"
+  - text: "Selected: USD"
+  - heading "Budget Summary" [level=3]
+  - text: "Monthly Income: $-100.00 Housing (0%): $6000.00 Total Expenses: $6000.00 Available for Subscriptions: $-6100.00"
+  - alert:
+    - img
+    - heading "Budget Exceeds Income" [level=3]
+    - paragraph: Your expenses and savings target exceed your monthly income. Consider adjusting your amounts.
+  - button "Complete Setup & Go to Dashboard"
+  - button "Skip budget setup (you can set it up later)"
+  - paragraph: 💡 Users with budgets save an average of 23% on their monthly subscription costs
+  - button "Back":
+    - img
+    - text: Back
+```

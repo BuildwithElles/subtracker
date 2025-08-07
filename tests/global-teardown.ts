@@ -1,6 +1,9 @@
+import fs from 'fs'
+import path from 'path'
+
 /**
  * 🧹 GLOBAL TEARDOWN FOR E2E TESTS
- * 
+ *
  * Cleans up the test environment after running authentication E2E tests
  */
 
@@ -45,9 +48,6 @@ async function globalTeardown() {
   console.log('📁 Cleaning up test artifacts...')
   
   try {
-    const fs = require('fs')
-    const path = require('path')
-    
     // Clean up temporary test files
     const tempDirs = [
       'test-artifacts',
@@ -80,7 +80,7 @@ async function globalTeardown() {
     const testSummary = {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'test',
-      baseURL: process.env.BASE_URL || 'http://localhost:3000',
+      baseURL: process.env.BASE_URL || 'http://localhost:5173',
       totalTests: 'TBD', // Would be populated from test results
       passed: 'TBD',
       failed: 'TBD',
@@ -91,7 +91,6 @@ async function globalTeardown() {
     
     // Save summary to file for CI/CD reporting
     if (process.env.CI) {
-      const fs = require('fs')
       const summaryPath = 'test-results/summary.json'
       fs.writeFileSync(summaryPath, JSON.stringify(testSummary, null, 2))
       console.log(`📄 Test summary saved to: ${summaryPath}`)
