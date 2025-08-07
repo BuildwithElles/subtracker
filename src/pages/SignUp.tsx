@@ -1,6 +1,18 @@
 import React, { useState } from 'react'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { ErrorMessage, SuccessMessage } from '../components/ErrorMessage'
+import { Branding } from '../components/Branding'
+import { TEST_IDS } from '../utils/testIds'
+import { 
+  validateEmail, 
+  validatePassword as validatePasswordStrength, 
+  validatePasswordConfirmation, 
+  validateFullName,
+  getPasswordStrength,
+  getPasswordStrengthLabel,
+  getPasswordStrengthColor
+} from '../utils/validation'
 
 interface FormData {
   fullName: string
@@ -21,8 +33,6 @@ interface FormErrors {
 
 export default function SignUp() {
   const navigate = useNavigate()
-  const location = useLocation()
-  const isLoginMode = location.pathname === '/login'
 
   const [formData, setFormData] = useState<FormData>({
     fullName: '',
@@ -63,25 +73,23 @@ export default function SignUp() {
     // Password validation
     if (!formData.password) {
       newErrors.password = 'Password is required'
-    } else if (!isLoginMode) {
-      // Only validate password strength for signup, not login
+    } else {
+      // Validate password strength for signup
       const passwordErrors = validatePassword(formData.password)
       if (passwordErrors.length > 0) {
         newErrors.password = `Password must have: ${passwordErrors.join(', ')}`
       }
     }
 
-    // Confirm password validation (only for signup)
-    if (!isLoginMode) {
-      if (!formData.confirmPassword) {
-        newErrors.confirmPassword = 'Please confirm your password'
-      } else if (formData.password !== formData.confirmPassword) {
-        newErrors.confirmPassword = 'Passwords do not match'
-      }
+    // Confirm password validation
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = 'Please confirm your password'
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match'
     }
 
-    // Full name validation (optional, but if provided should be valid) - only for signup
-    if (!isLoginMode && formData.fullName && formData.fullName.trim().length < 2) {
+    // Full name validation (optional, but if provided should be valid)
+    if (formData.fullName && formData.fullName.trim().length < 2) {
       newErrors.fullName = 'Full name must be at least 2 characters'
     }
 
@@ -96,38 +104,43 @@ export default function SignUp() {
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: undefined }))
     }
-  }
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setErrors({})
-
-    if (!validateForm()) {
-      return
-    }
-
-    setLoading(true)
-
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
-      })
-
-      if (error) {
-        setErrors({ general: error.message })
-      } else if (data.user) {
-        // Check onboarding status and redirect appropriately
-        if (data.user.user_metadata?.onboarding_completed) {
-          navigate('/dashboard')
-        } else {
-          navigate('/onboarding')
-        }
+    // Real-time validation for better UX
+    if (value.trim() !== '') {
+      let errorMessage = ''
+      
+      switch (field) {
+        case 'email':
+          const emailValidation = validateEmail(value)
+          if (!emailValidation.isValid) {
+            errorMessage = emailValidation.message
+          }
+          break
+        case 'password':
+          const passwordValidation = validatePasswordStrength(value)
+          if (!passwordValidation.isValid) {
+            errorMessage = passwordValidation.message
+          }
+          break
+        case 'confirmPassword':
+          const confirmValidation = validatePasswordConfirmation(formData.password, value)
+          if (!confirmValidation.isValid) {
+            errorMessage = confirmValidation.message
+          }
+          break
+        case 'fullName':
+          const nameValidation = validateFullName(value)
+          if (!nameValidation.isValid) {
+            errorMessage = nameValidation.message
+          }
+          break
+        default:
+          return
       }
-    } catch (error: any) {
-      setErrors({ general: 'An unexpected error occurred. Please try again.' })
-    } finally {
-      setLoading(false)
+
+      if (errorMessage) {
+        setErrors(prev => ({ ...prev, [field]: errorMessage }))
+      }
     }
   }
 
@@ -192,11 +205,7 @@ export default function SignUp() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    if (isLoginMode) {
-      await handleLogin(e)
-    } else {
-      await handleSignUp(e)
-    }
+    await handleSignUp(e)
   }
 
   const handleGoogleSignUp = async () => {
@@ -229,79 +238,57 @@ export default function SignUp() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
+        {/* Branding */}
+        <Branding size="large" />
+        
         <div>
-          <Link to="/" className="flex justify-center">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">S</span>
-              </div>
-              <h2 className="text-3xl font-bold text-gray-900">SubTracker</h2>
-            </div>
-          </Link>
           <h2 className="mt-6 text-center text-2xl font-bold text-gray-900">
-            {isLoginMode ? 'Sign in to your account' : 'Create your account'}
+            Create your account
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            {isLoginMode ? (
-              <>
-                Or{' '}
-                <Link to="/signup" className="font-medium text-blue-600 hover:text-blue-500">
-                  create a new account
-                </Link>
-              </>
-            ) : (
-              <>
-                Or{' '}
-                <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-                  sign in to your existing account
-                </Link>
-              </>
-            )}
+            Already have an account?{' '}
+            <Link 
+              to="/login" 
+              className="font-medium text-blue-600 hover:text-blue-500"
+              data-testid={TEST_IDS.LOGIN_LINK}
+            >
+              Sign in
+            </Link>
           </p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {errors.general && (
-            <div className="rounded-md bg-red-50 p-4 border border-red-200">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm text-red-700">{errors.general}</p>
-                </div>
-              </div>
-            </div>
-          )}
+        <form 
+          className="mt-8 space-y-6" 
+          onSubmit={handleSubmit}
+          data-testid={TEST_IDS.SIGNUP_FORM}
+        >
+          <ErrorMessage 
+            message={errors.general || ''} 
+            className="rounded-md bg-red-50 p-4 border border-red-200"
+            data-testid={TEST_IDS.GENERAL_ERROR}
+          />
 
           <div className="space-y-4">
-            {/* Full Name (Optional) - Only show for signup */}
-            {!isLoginMode && (
-              <div>
-                <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
-                  Full Name <span className="text-gray-400">(optional)</span>
-                </label>
-                <input
-                  id="fullName"
-                  name="fullName"
-                  type="text"
-                  autoComplete="name"
-                  className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
-                    errors.fullName ? 'border-red-300' : 'border-gray-300'
-                  } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                  placeholder="Enter your full name"
-                  value={formData.fullName}
-                  onChange={e => handleInputChange('fullName', e.target.value)}
-                />
-                {errors.fullName && <p className="mt-1 text-sm text-red-600">{errors.fullName}</p>}
-              </div>
-            )}
+            {/* Full Name (Optional) */}
+            <div>
+              <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
+                Full Name <span className="text-gray-400">(optional)</span>
+              </label>
+              <input
+                data-testid={TEST_IDS.FULLNAME_INPUT}
+                id="fullName"
+                name="fullName"
+                type="text"
+                autoComplete="name"
+                className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
+                  errors.fullName ? 'border-red-300' : 'border-gray-300'
+                } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
+                placeholder="Enter your full name"
+                value={formData.fullName}
+                onChange={e => handleInputChange('fullName', e.target.value)}
+              />
+              <ErrorMessage message={errors.fullName || ''} data-testid={TEST_IDS.FULLNAME_ERROR} />
+            </div>
 
             {/* Email */}
             <div>
@@ -309,11 +296,11 @@ export default function SignUp() {
                 Email address <span className="text-red-500">*</span>
               </label>
               <input
+                data-testid={TEST_IDS.EMAIL_INPUT}
                 id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
-                required
                 className={`mt-1 appearance-none relative block w-full px-3 py-2 border ${
                   errors.email ? 'border-red-300' : 'border-gray-300'
                 } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
@@ -321,7 +308,7 @@ export default function SignUp() {
                 value={formData.email}
                 onChange={e => handleInputChange('email', e.target.value)}
               />
-              {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
+              <ErrorMessage message={errors.email || ''} data-testid={TEST_IDS.EMAIL_ERROR} />
             </div>
 
             {/* Password */}
@@ -331,15 +318,15 @@ export default function SignUp() {
               </label>
               <div className="mt-1 relative">
                 <input
+                  data-testid={TEST_IDS.PASSWORD_INPUT}
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete={isLoginMode ? 'current-password' : 'new-password'}
-                  required
+                  autoComplete="new-password"
                   className={`appearance-none relative block w-full px-3 py-2 pr-10 border ${
                     errors.password ? 'border-red-300' : 'border-gray-300'
                   } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                  placeholder={isLoginMode ? 'Enter your password' : 'Create a strong password'}
+                  placeholder="Create a strong password"
                   value={formData.password}
                   onChange={e => handleInputChange('password', e.target.value)}
                 />
@@ -385,18 +372,22 @@ export default function SignUp() {
                   )}
                 </button>
               </div>
-              {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
-              {!isLoginMode && formData.password && !errors.password && (
+              <ErrorMessage message={errors.password || ''} data-testid={TEST_IDS.PASSWORD_ERROR} />
+              {formData.password && !errors.password && (
                 <div className="mt-2">
-                  <div className="text-xs text-gray-600 mb-1">Password strength:</div>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-gray-600">Password strength:</span>
+                    <span className={`font-medium ${getPasswordStrengthColor(getPasswordStrength(formData.password))}`}>
+                      {getPasswordStrengthLabel(getPasswordStrength(formData.password))}
+                    </span>
+                  </div>
                   <div className="flex space-x-1">
                     {[...Array(4)].map((_, i) => {
-                      const requirements = validatePassword(formData.password)
-                      const strength = 4 - requirements.length
+                      const strength = getPasswordStrength(formData.password)
                       return (
                         <div
                           key={i}
-                          className={`h-1 flex-1 rounded ${
+                          className={`h-2 flex-1 rounded ${
                             i < strength
                               ? strength <= 1
                                 ? 'bg-red-400'
@@ -418,99 +409,80 @@ export default function SignUp() {
               )}
             </div>
 
-            {/* Confirm Password - Only show for signup */}
-            {!isLoginMode && (
-              <div>
-                <label
-                  htmlFor="confirmPassword"
-                  className="block text-sm font-medium text-gray-700"
+            {/* Confirm Password */}
+            <div>
+              <label
+                htmlFor="confirmPassword"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Confirm Password <span className="text-red-500">*</span>
+              </label>
+              <div className="mt-1 relative">
+                <input
+                  data-testid={TEST_IDS.CONFIRM_PASSWORD_INPUT}
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  className={`appearance-none relative block w-full px-3 py-2 pr-10 border ${
+                    errors.confirmPassword ? 'border-red-300' : 'border-gray-300'
+                  } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
+                  placeholder="Confirm your password"
+                  value={formData.confirmPassword}
+                  onChange={e => handleInputChange('confirmPassword', e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 >
-                  Confirm Password <span className="text-red-500">*</span>
-                </label>
-                <div className="mt-1 relative">
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    required
-                    className={`appearance-none relative block w-full px-3 py-2 pr-10 border ${
-                      errors.confirmPassword ? 'border-red-300' : 'border-gray-300'
-                    } placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
-                    placeholder="Confirm your password"
-                    value={formData.confirmPassword}
-                    onChange={e => handleInputChange('confirmPassword', e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  >
-                    {showConfirmPassword ? (
-                      <svg
-                        className="h-5 w-5 text-gray-400"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="h-5 w-5 text-gray-400"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-                {errors.confirmPassword && (
-                  <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>
-                )}
-                {formData.confirmPassword &&
-                  formData.password === formData.confirmPassword &&
-                  !errors.confirmPassword && (
-                    <p className="mt-1 text-sm text-green-600 flex items-center">
-                      <svg
-                        className="w-4 h-4 mr-1"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      Passwords match
-                    </p>
+                  {showConfirmPassword ? (
+                    <svg
+                      className="h-5 w-5 text-gray-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="h-5 w-5 text-gray-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                      />
+                    </svg>
                   )}
+                </button>
               </div>
-            )}
+              <ErrorMessage message={errors.confirmPassword || ''} data-testid={TEST_IDS.CONFIRM_PASSWORD_ERROR} />
+              {formData.confirmPassword &&
+                formData.password === formData.confirmPassword &&
+                !errors.confirmPassword && (
+                  <SuccessMessage message="Passwords match" data-testid={TEST_IDS.PASSWORDS_MATCH_SUCCESS} />
+                )}
+            </div>
 
             {/* Referrer Code (Optional) - Only show for signup */}
-            {!isLoginMode && (
+            {(
               <div>
                 <label htmlFor="referrerCode" className="block text-sm font-medium text-gray-700">
                   Referrer Code <span className="text-gray-400">(optional)</span>
@@ -536,6 +508,7 @@ export default function SignUp() {
           {/* Submit Button */}
           <div>
             <button
+              data-testid={TEST_IDS.SUBMIT_BUTTON}
               type="submit"
               disabled={loading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
@@ -547,6 +520,7 @@ export default function SignUp() {
                     xmlns="http://www.w3.org/2000/svg"
                     fill="none"
                     viewBox="0 0 24 24"
+                    data-testid={TEST_IDS.LOADING_SPINNER}
                   >
                     <circle
                       className="opacity-25"
@@ -562,15 +536,25 @@ export default function SignUp() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     ></path>
                   </svg>
-                  {isLoginMode ? 'Signing in...' : 'Creating account...'}
+                  Creating account...
                 </div>
-              ) : isLoginMode ? (
-                'Sign In'
               ) : (
                 'Create Account'
               )}
             </button>
           </div>
+
+          {/* Forgot Password Link for Login Mode */}
+          {isLoginMode && (
+            <div className="text-center">
+              <Link
+                to="/password-reset"
+                className="text-sm text-blue-600 hover:text-blue-500 font-medium"
+              >
+                Forgot your password?
+              </Link>
+            </div>
+          )}
 
           {/* Divider */}
           {!isLoginMode && (
@@ -585,14 +569,14 @@ export default function SignUp() {
           )}
 
           {/* Google Sign Up */}
-          {!isLoginMode && (
-            <div>
-              <button
-                type="button"
-                onClick={handleGoogleSignUp}
-                disabled={loading}
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
-              >
+          <div>
+            <button
+              type="button"
+              onClick={handleGoogleSignUp}
+              disabled={loading}
+              className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
+              data-testid={TEST_IDS.GOOGLE_OAUTH_BUTTON}
+            >
                 {loading ? (
                   <div className="flex items-center">
                     <svg
@@ -642,11 +626,9 @@ export default function SignUp() {
                 )}
               </button>
             </div>
-          )}
 
           {/* Terms and Privacy */}
-          {!isLoginMode && (
-            <div className="text-center">
+          <div className="text-center">
               <p className="text-xs text-gray-500">
                 By creating an account, you agree to our{' '}
                 <Link to="/terms" className="text-blue-600 hover:text-blue-500">
@@ -658,7 +640,6 @@ export default function SignUp() {
                 </Link>
               </p>
             </div>
-          )}
         </form>
       </div>
     </div>

@@ -26,12 +26,12 @@ test.describe('📖 User Story: New User Registration', () => {
     await expect(page.locator('h1, h2').filter({ hasText: /create.*account|sign up/i })).toBeVisible()
     
     // And: I fill out the registration form with valid information
-    await page.fill('input[type="email"]', newUser.email)
-    await page.fill('input[type="password"]:first-of-type', newUser.password)
-    await page.fill('input[type="password"]:last-of-type', newUser.password)
+    await page.fill('[data-testid="email-input"]', newUser.email)
+    await page.fill('[data-testid="password-input"]', newUser.password)
+    await page.fill('[data-testid="confirm-password-input"]', newUser.password)
     
     // And: I submit the form
-    await page.click('button[type="submit"]')
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a loading state
     await expect(page.locator('.loading, [data-testid="loading"]')).toBeVisible()
@@ -52,31 +52,31 @@ test.describe('📖 User Story: New User Registration', () => {
     await page.goto(TestConfig.ROUTES.signup)
     
     // When: I try to submit an empty form
-    await page.click('button[type="submit"]')
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see validation messages for required fields
     await expect(page.locator(TestConfig.TEXT_PATTERNS.validation.requiredEmail)).toBeVisible()
     await expect(page.locator(TestConfig.TEXT_PATTERNS.validation.requiredPassword)).toBeVisible()
     
     // When: I enter an invalid email
-    await page.fill('input[type="email"]', 'invalid-email')
-    await page.blur('input[type="email"]')
+    await page.fill('[data-testid="email-input"]', 'invalid-email')
+    await page.blur('[data-testid="email-input"]')
     
     // Then: I should see an email format validation message
     await expect(page.locator(TestConfig.TEXT_PATTERNS.validation.invalidEmail)).toBeVisible()
     
     // When: I enter a weak password
     const invalidUser = TestDataFactory.createInvalidUser()
-    await page.fill('input[type="password"]:first-of-type', invalidUser.weakPassword.password)
-    await page.blur('input[type="password"]:first-of-type')
+    await page.fill('[data-testid="password-input"]', invalidUser.weakPassword.password)
+    await page.blur('[data-testid="password-input"]')
     
     // Then: I should see password strength requirements
     await expect(page.locator(TestConfig.TEXT_PATTERNS.validation.weakPassword)).toBeVisible()
     
     // When: I enter mismatched passwords
-    await page.fill('input[type="password"]:first-of-type', 'ValidPassword123!')
-    await page.fill('input[type="password"]:last-of-type', 'DifferentPassword123!')
-    await page.blur('input[type="password"]:last-of-type')
+    await page.fill('[data-testid="password-input"]', 'ValidPassword123!')
+    await page.fill('[data-testid="confirm-password-input"]', 'DifferentPassword123!')
+    await page.blur('[data-testid="confirm-password-input"]')
     
     // Then: I should see a password mismatch message
     await expect(page.locator(TestConfig.TEXT_PATTERNS.validation.passwordMismatch)).toBeVisible()
@@ -181,11 +181,11 @@ test.describe('🔑 User Story: User Login', () => {
     await expect(page.locator('h1, h2').filter({ hasText: /sign in|login/i })).toBeVisible()
     
     // And: I enter my credentials
-    await page.fill('input[type="email"]', existingUser.email)
-    await page.fill('input[type="password"]', existingUser.password)
+    await page.fill('[data-testid="email-input"]', existingUser.email)
+    await page.fill('[data-testid="password-input"]', existingUser.password)
     
     // And: I submit the login form
-    await page.click('button[type="submit"]')
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a loading state
     await expect(page.locator(TestConfig.TEXT_PATTERNS.loading.signingIn)).toBeVisible()
@@ -203,16 +203,16 @@ test.describe('🔑 User Story: User Login', () => {
     await page.goto(TestConfig.ROUTES.login)
     
     // When: I enter incorrect credentials
-    await page.fill('input[type="email"]', 'nonexistent@example.com')
-    await page.fill('input[type="password"]', 'wrongpassword')
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', 'nonexistent@example.com')
+    await page.fill('[data-testid="password-input"]', 'wrongpassword')
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a clear error message
     await expect(page.locator(TestConfig.TEXT_PATTERNS.auth.loginError)).toBeVisible()
     
     // And: The form should remain accessible for another attempt
-    await expect(page.locator('input[type="email"]')).toBeVisible()
-    await expect(page.locator('input[type="password"]')).toBeVisible()
+    await expect(page.locator('[data-testid="email-input"]')).toBeVisible()
+    await expect(page.locator('[data-testid="password-input"]')).toBeVisible()
     
     // And: I should have access to password reset if needed
     await expect(page.locator('a:has-text("Forgot password?")')).toBeVisible()
@@ -224,9 +224,9 @@ test.describe('🔑 User Story: User Login', () => {
     
     // When: I try to log in
     await page.goto(TestConfig.ROUTES.login)
-    await page.fill('input[type="email"]', unconfirmedUser.email)
-    await page.fill('input[type="password"]', unconfirmedUser.password)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', unconfirmedUser.email)
+    await page.fill('[data-testid="password-input"]', unconfirmedUser.password)
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a message about email confirmation
     await expect(page.locator('text="confirm your email", text="email not verified"')).toBeVisible()
@@ -249,9 +249,9 @@ test.describe('🔑 User Story: User Login', () => {
       
       // And: I log in successfully
       const user = TestDataFactory.createConfirmedUser()
-      await page.fill('input[type="email"]', user.email)
-      await page.fill('input[type="password"]', user.password)
-      await page.click('button[type="submit"]')
+      await page.fill('[data-testid="email-input"]', user.email)
+      await page.fill('[data-testid="password-input"]', user.password)
+      await page.click('[data-testid="submit-button"]')
       
       // Then: My session should persist across browser sessions
       await expect(page).toHaveURL(TestConfig.ROUTES.dashboard)
@@ -275,8 +275,8 @@ test.describe('🔄 User Story: Password Reset', () => {
     await expect(page.locator('h1, h2').filter({ hasText: /reset|forgot/i })).toBeVisible()
     
     // And: I enter my email address
-    await page.fill('input[type="email"]', user.email)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', user.email)
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a confirmation that the reset email was sent
     await expect(page.locator(TestConfig.TEXT_PATTERNS.auth.emailSent)).toBeVisible()
@@ -288,14 +288,14 @@ test.describe('🔄 User Story: Password Reset', () => {
     
     // Then: I should see a form to enter my new password
     await expect(page.locator('h1, h2').filter({ hasText: /new password|reset password/i })).toBeVisible()
-    await expect(page.locator('input[type="password"]:first-of-type')).toBeVisible()
-    await expect(page.locator('input[type="password"]:last-of-type')).toBeVisible()
+    await expect(page.locator('[data-testid="password-input"]')).toBeVisible()
+    await expect(page.locator('[data-testid="confirm-password-input"]')).toBeVisible()
     
     // When: I enter a new strong password
     const newPassword = 'NewStrongPassword123!'
-    await page.fill('input[type="password"]:first-of-type', newPassword)
-    await page.fill('input[type="password"]:last-of-type', newPassword)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="password-input"]', newPassword)
+    await page.fill('[data-testid="confirm-password-input"]', newPassword)
+    await page.click('[data-testid="submit-button"]')
     
     // Then: My password should be updated successfully
     await expect(page.locator(TestConfig.TEXT_PATTERNS.auth.passwordReset)).toBeVisible()
@@ -304,9 +304,9 @@ test.describe('🔄 User Story: Password Reset', () => {
     await expect(page).toHaveURL(TestConfig.ROUTES.login)
     
     // And: I should be able to log in with my new password
-    await page.fill('input[type="email"]', user.email)
-    await page.fill('input[type="password"]', newPassword)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', user.email)
+    await page.fill('[data-testid="password-input"]', newPassword)
+    await page.click('[data-testid="submit-button"]')
     await expect(page).toHaveURL(TestConfig.ROUTES.dashboard)
   })
 
@@ -329,13 +329,13 @@ test.describe('🔄 User Story: Password Reset', () => {
     }
     
     // When: I enter a weak password
-    await page.fill('input[type="password"]:first-of-type', 'weak')
+    await page.fill('[data-testid="password-input"]', 'weak')
     
     // Then: I should see validation feedback
     await expect(page.locator('.text-red, .text-destructive, .error')).toBeVisible()
     
     // When: I enter a strong password
-    await page.fill('input[type="password"]:first-of-type', 'StrongPassword123!')
+    await page.fill('[data-testid="password-input"]', 'StrongPassword123!')
     
     // Then: I should see positive validation feedback
     await expect(page.locator('.text-green, .text-success')).toBeVisible()
@@ -389,9 +389,9 @@ test.describe('🔐 User Story: Security and Session Management', () => {
     // Given: I am logged into my account
     const user = TestDataFactory.createConfirmedUser()
     await page.goto(TestConfig.ROUTES.login)
-    await page.fill('input[type="email"]', user.email)
-    await page.fill('input[type="password"]', user.password)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', user.email)
+    await page.fill('[data-testid="password-input"]', user.password)
+    await page.click('[data-testid="submit-button"]')
     await expect(page).toHaveURL(TestConfig.ROUTES.dashboard)
     
     // When: I simulate session expiration
@@ -435,25 +435,25 @@ test.describe('♿ User Story: Accessibility and Inclusive Design', () => {
     await page.goto(TestConfig.ROUTES.signup)
     
     // Then: Form elements should have proper labels
-    await expect(page.locator('input[type="email"]')).toHaveAttribute('aria-label', /email/i)
-    await expect(page.locator('input[type="password"]')).toHaveAttribute('aria-label', /password/i)
+    await expect(page.locator('[data-testid="email-input"]')).toHaveAttribute('aria-label', /email/i)
+    await expect(page.locator('[data-testid="password-input"]')).toHaveAttribute('aria-label', /password/i)
     
     // And: Error messages should be announced to screen readers
-    await page.click('button[type="submit"]')
+    await page.click('[data-testid="submit-button"]')
     await expect(page.locator('[role="alert"], [aria-live="polite"]')).toBeVisible()
     
     // And: I should be able to navigate with keyboard only
     await page.keyboard.press('Tab') // Email field
-    await expect(page.locator('input[type="email"]')).toBeFocused()
+    await expect(page.locator('[data-testid="email-input"]')).toBeFocused()
     
     await page.keyboard.press('Tab') // Password field
-    await expect(page.locator('input[type="password"]:first-of-type')).toBeFocused()
+    await expect(page.locator('[data-testid="password-input"]')).toBeFocused()
     
     await page.keyboard.press('Tab') // Confirm password field
-    await expect(page.locator('input[type="password"]:last-of-type')).toBeFocused()
+    await expect(page.locator('[data-testid="confirm-password-input"]')).toBeFocused()
     
     await page.keyboard.press('Tab') // Submit button
-    await expect(page.locator('button[type="submit"]')).toBeFocused()
+    await expect(page.locator('[data-testid="submit-button"]')).toBeFocused()
   })
 
   test('Story: As a mobile user, I want the authentication forms to work well on my touch device', async ({ page }) => {
@@ -465,7 +465,7 @@ test.describe('♿ User Story: Accessibility and Inclusive Design', () => {
     await expect(page.locator('form')).toBeVisible()
     
     // And: Touch targets should be large enough
-    const submitButton = page.locator('button[type="submit"]')
+    const submitButton = page.locator('[data-testid="submit-button"]')
     const boundingBox = await submitButton.boundingBox()
     
     if (boundingBox) {
@@ -473,7 +473,7 @@ test.describe('♿ User Story: Accessibility and Inclusive Design', () => {
     }
     
     // And: Virtual keyboard should be appropriate
-    const emailInput = page.locator('input[type="email"]')
+    const emailInput = page.locator('[data-testid="email-input"]')
     await emailInput.click()
     await expect(emailInput).toHaveAttribute('inputmode', 'email')
   })
@@ -486,10 +486,10 @@ test.describe('🔄 User Story: Error Recovery and Help', () => {
     await page.goto(TestConfig.ROUTES.signup)
     
     const user = TestDataFactory.createTestUser()
-    await page.fill('input[type="email"]', user.email)
-    await page.fill('input[type="password"]:first-of-type', user.password)
-    await page.fill('input[type="password"]:last-of-type', user.password)
-    await page.click('button[type="submit"]')
+    await page.fill('[data-testid="email-input"]', user.email)
+    await page.fill('[data-testid="password-input"]', user.password)
+    await page.fill('[data-testid="confirm-password-input"]', user.password)
+    await page.click('[data-testid="submit-button"]')
     
     // Then: I should see a helpful error message
     await expect(page.locator('text="network error", text="connection failed", text="try again"')).toBeVisible()
@@ -498,7 +498,7 @@ test.describe('🔄 User Story: Error Recovery and Help', () => {
     await expect(page.locator('button:has-text("Try Again"), button:has-text("Retry")')).toBeVisible()
     
     // And: The form data should be preserved
-    await expect(page.locator('input[type="email"]')).toHaveValue(user.email)
+    await expect(page.locator('[data-testid="email-input"]')).toHaveValue(user.email)
   })
 
   test('Story: As a user, I want access to help if I\'m having trouble with authentication', async ({ page }) => {

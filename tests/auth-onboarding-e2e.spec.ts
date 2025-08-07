@@ -1,5 +1,10 @@
 import { test, expect, Page } from '@playwright/test'
 import { faker } from '@faker-js/faker'
+import { 
+  ensureSupabaseClient, 
+  testSupabaseConnection, 
+  cleanupTestSession 
+} from './utils/supabase-test-utils'
 
 /**
  * 🧪 END-TO-END TESTS: User Authentication & Onboarding Flow
@@ -575,39 +580,99 @@ test.describe('🔐 User Authentication & Onboarding E2E Tests', () => {
 
 test.describe('🔧 Integration with Supabase Auth', () => {
   test('should properly integrate with Supabase authentication', async ({ page }) => {
-    // Test Supabase Auth integration
+    // Navigate to signup page to ensure app is loaded
     await page.goto('/signup')
     
-    // Check for Supabase client initialization
-    const supabaseClient = await page.evaluate(() => {
-      return (window as any).supabase !== undefined
-    })
+    // Use test utility to ensure Supabase client is properly initialized
+    await ensureSupabaseClient(page)
     
-    expect(supabaseClient).toBeTruthy()
+    // Test Supabase connection comprehensively
+    const connectionResult = await testSupabaseConnection(page)
+    
+    expect(connectionResult.connected).toBeTruthy()
+    expect(connectionResult.canPerformAuth).toBeTruthy()
+    
+    if (connectionResult.error) {
+      console.warn('Supabase connection warning:', connectionResult.error)
+      // Don't fail the test for warnings, only for critical errors
+      expect(connectionResult.error).not.toContain('Invalid API key')
+      expect(connectionResult.error).not.toContain('supabase is not defined')
+    }
   })
 
   test('should handle Supabase Auth state changes', async ({ page }) => {
-    await page.goto('/dashboard')
+    await page.goto('/signup')
     
-    // Should handle auth state changes properly
-    await page.evaluate(() => {
-      // Simulate auth state change
-      if ((window as any).supabase) {
-        (window as any).supabase.auth.onAuthStateChange((event: string, session: any) => {
+    // Ensure Supabase client is available
+    await ensureSupabaseClient(page)
+    
+    // Test auth state change handler
+    const authStateHandlerWorks = await page.evaluate(() => {
+      try {
+        const supabase = (window as any).supabase
+        
+        // Set up auth state change listener
+        const { data } = supabase.auth.onAuthStateChange((event: string, session: any) => {
           console.log('Auth state changed:', event, session)
         })
+        
+        // Clean up the listener
+        if (data?.subscription?.unsubscribe) {
+          data.subscription.unsubscribe()
+        }
+        
+        return true
+      } catch (error) {
+        console.error('Auth state handler error:', error)
+        return false
       }
     })
+    
+    expect(authStateHandlerWorks).toBeTruthy()
+  })
+
+  test('should have proper error handling for authentication operations', async ({ page }) => {
+    await page.goto('/signup')
+    
+    // Ensure Supabase client is available
+    await ensureSupabaseClient(page)
+    
+    // Test error handling with invalid credentials
+    const errorHandling = await page.evaluate(async () => {
+      try {
+        const supabase = (window as any).supabase
+        
+        // Test with invalid email format
+        const { data, error } = await supabase.auth.signUp({
+          email: 'invalid-email-format',
+          password: 'ValidPassword123!'
+        })
+        
+        return {
+          success: true,
+          hasError: !!error,
+          errorMessage: error?.message || '',
+          properErrorHandling: error && typeof error.message === 'string'
+        }
+      } catch (error) {
+        return {
+          success: false,
+          hasError: true,
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+          properErrorHandling: false
+        }
+      }
+    })
+    
+    expect(errorHandling.success).toBeTruthy()
+    expect(errorHandling.properErrorHandling).toBeTruthy()
   })
 })
 
 // Test Data Cleanup
 test.afterEach(async ({ page }) => {
-  // Clear any test data created during tests
-  await page.evaluate(() => {
-    localStorage.clear()
-    sessionStorage.clear()
-  })
+  // Clean up any test data created during tests
+  await cleanupTestSession(page)
 })
 
 test.afterAll(async () => {

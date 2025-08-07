@@ -16,7 +16,7 @@ test.describe('🔥 Basic Authentication Tests', () => {
     
     // Check for form elements
     await expect(page.locator('input[name="email"], input[type="email"]')).toBeVisible()
-    await expect(page.locator('input[name="password"], input[type="password"]')).toBeVisible()
+    await expect(page.locator('[data-testid="password-input"]')).toBeVisible()
     await expect(page.locator('button[type="submit"]')).toBeVisible()
   })
 
@@ -37,16 +37,15 @@ test.describe('🔥 Basic Authentication Tests', () => {
     await expect(page).toHaveTitle(/SubTracker/i)
     
     // Look for any form or login elements
-    const hasForm = await page.locator('form, input[type="email"], input[type="password"]').count()
+    const hasForm = await page.locator('form, [data-testid="email-input"], [data-testid="password-input"]').count()
     expect(hasForm).toBeGreaterThan(0)
   })
 
   test('should have Google OAuth button on signup', async ({ page }) => {
     await page.goto('/signup')
     
-    // Look for Google OAuth button
-    const googleButton = page.locator('button:has-text("Google"), button:has-text("Sign up with Google")')
-    await expect(googleButton).toBeVisible()
+    // Look for Google OAuth button using test ID
+    await expect(page.locator('[data-testid="google-oauth-button"]')).toBeVisible()
   })
 
   test('should have responsive design', async ({ page }) => {
@@ -62,32 +61,31 @@ test.describe('🔥 Basic Authentication Tests', () => {
   test('should navigate between auth pages', async ({ page }) => {
     await page.goto('/signup')
     
-    // Look for login link
-    const loginLink = page.locator('a:has-text("Sign in"), a:has-text("Login"), a[href*="login"]')
-    if (await loginLink.count() > 0) {
-      await loginLink.click()
-      await expect(page).toHaveURL(/\/login/)
-    }
+    // Look for login link using test ID
+    await expect(page.locator('[data-testid="login-link"]')).toBeVisible()
+    await page.locator('[data-testid="login-link"]').click()
+    await expect(page).toHaveURL(/\/login/)
   })
 
   test('should handle form input correctly', async ({ page }) => {
     await page.goto('/signup')
     
-    // Fill form with test data
-    await page.fill('input[type="email"]', 'test@example.com')
-    await page.fill('input[type="password"]', 'TestPassword123!')
+    // Fill form with test data using test IDs
+    await page.fill('[data-testid="email-input"]', 'test@example.com')
+    await page.fill('[data-testid="password-input"]', 'TestPassword123!')
+    await page.fill('[data-testid="confirm-password-input"]', 'TestPassword123!')
     
     // Verify values are set
-    await expect(page.locator('input[type="email"]')).toHaveValue('test@example.com')
-    await expect(page.locator('input[type="password"]')).toHaveValue('TestPassword123!')
+    await expect(page.locator('[data-testid="email-input"]')).toHaveValue('test@example.com')
+    await expect(page.locator('[data-testid="password-input"]')).toHaveValue('TestPassword123!')
   })
 
   test('should have proper accessibility attributes', async ({ page }) => {
     await page.goto('/signup')
     
     // Check for proper labels and ARIA attributes
-    const emailInput = page.locator('input[type="email"]')
-    const passwordInput = page.locator('input[type="password"]')
+    const emailInput = page.locator('[data-testid="email-input"]')
+    const passwordInput = page.locator('[data-testid="password-input"]')
     
     // Verify inputs have proper accessibility attributes
     await expect(emailInput).toBeVisible()
@@ -122,20 +120,23 @@ test.describe('🎨 UI/UX Basic Tests', () => {
   test('should have consistent branding', async ({ page }) => {
     await page.goto('/signup')
     
-    // Check for SubTracker branding
-    const brandingElements = page.locator('text="SubTracker", [alt*="SubTracker"], [src*="logo"]')
-    expect(await brandingElements.count()).toBeGreaterThan(0)
+    // Check for SubTracker branding using test IDs
+    await expect(page.locator('[data-testid="app-title"]')).toBeVisible()
+    await expect(page.locator('[data-testid="app-title"]')).toContainText('SubTracker')
+    
+    // Check for tagline
+    await expect(page.locator('[data-testid="app-tagline"]')).toBeVisible()
   })
 
   test('should have loading states', async ({ page }) => {
     await page.goto('/signup')
     
     // Fill form and submit to trigger loading
-    await page.fill('input[type="email"]', 'test@example.com')
-    await page.fill('input[type="password"]', 'TestPassword123!')
+    await page.fill('[data-testid="email-input"]', 'test@example.com')
+    await page.fill('[data-testid="password-input"]', 'TestPassword123!')
     
     // Click submit and check for button state changes
-    const submitButton = page.locator('button[type="submit"]').first()
+    const submitButton = page.locator('[data-testid="submit-button"]')
     await submitButton.click()
     
     // Button should be disabled or show loading text

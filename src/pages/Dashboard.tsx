@@ -6,6 +6,7 @@ import { gmailIntegration, ParsedTrialEmail } from '../lib/gmailParser'
 import { alertSystem, TrialAlert, BudgetAlert } from '../lib/alertSystem'
 import { weeklyDigestSystem, WeeklyDigest } from '../lib/weeklyDigest'
 import { budgetAnalytics, BudgetInsights } from '../lib/budgetAnalytics'
+import { TEST_IDS } from '../utils/testIds'
 import type { User, UserMetadata } from '../types'
 
 interface Subscription {
@@ -704,9 +705,9 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" data-testid={TEST_IDS.DASHBOARD_CONTENT}>
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <header className="bg-white shadow-sm border-b" data-testid={TEST_IDS.HEADER}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-4">
@@ -714,7 +715,12 @@ export default function Dashboard() {
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold text-sm">S</span>
                 </div>
-                <h1 className="text-xl font-bold text-gray-900">SubTracker</h1>
+                <h1 
+                  className="text-xl font-bold text-gray-900"
+                  data-testid={TEST_IDS.APP_TITLE}
+                >
+                  SubTracker
+                </h1>
               </div>
             </div>
             <div className="flex items-center space-x-4">
@@ -795,6 +801,7 @@ export default function Dashboard() {
                 }
                 className="p-2 text-gray-400 hover:text-red-600 relative group"
                 title="Logout"
+                data-testid={TEST_IDS.LOGOUT_BUTTON}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -814,7 +821,10 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main 
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6"
+        data-testid={TEST_IDS.MAIN_CONTENT}
+      >
         {/* Weekly Digest Banner */}
         {weeklyDigestSummary?.hasUnviewedDigest && weeklyDigestSummary.latestDigest && (
           <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">

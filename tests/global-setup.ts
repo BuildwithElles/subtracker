@@ -56,8 +56,8 @@ async function globalSetup() {
   
   // Create test directories
   console.log('📁 Setting up test directories...')
-  const fs = await import('fs')
-  const path = await import('path')
+  const fs = require('fs')
+  const path = require('path')
   
   const testDirs = [
     'test-results',
@@ -66,9 +66,9 @@ async function globalSetup() {
   ]
   
   testDirs.forEach(dir => {
-    const fullPath = path.default.join(process.cwd(), dir)
-    if (!fs.default.existsSync(fullPath)) {
-      fs.default.mkdirSync(fullPath, { recursive: true })
+    const fullPath = path.join(process.cwd(), dir)
+    if (!fs.existsSync(fullPath)) {
+      fs.mkdirSync(fullPath, { recursive: true })
       console.log(`📁 Created directory: ${dir}`)
     }
   })

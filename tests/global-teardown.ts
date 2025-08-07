@@ -45,8 +45,8 @@ async function globalTeardown() {
   console.log('📁 Cleaning up test artifacts...')
   
   try {
-    const fs = await import('fs')
-    const path = await import('path')
+    const fs = require('fs')
+    const path = require('path')
     
     // Clean up temporary test files
     const tempDirs = [
@@ -56,9 +56,9 @@ async function globalTeardown() {
     ]
     
     tempDirs.forEach(dir => {
-      const fullPath = path.default.join(process.cwd(), dir)
-      if (fs.default.existsSync(fullPath)) {
-        fs.default.rmSync(fullPath, { recursive: true, force: true })
+      const fullPath = path.join(process.cwd(), dir)
+      if (fs.existsSync(fullPath)) {
+        fs.rmSync(fullPath, { recursive: true, force: true })
         console.log(`🗑️ Removed temp directory: ${dir}`)
       }
     })
